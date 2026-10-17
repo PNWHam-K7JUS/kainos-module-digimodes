@@ -1,4 +1,4 @@
-/*  DigiEngine.cs
+﻿/*  DigiEngine.cs
 
 The running FT8 / FT4 station: the receiver's audio into the slot recorder, a decode at the end of every period,
 automatic sequencing, and transmitting in the chosen periods, timed by the PC's clock (keep it synchronised:
@@ -52,7 +52,13 @@ namespace Kainos.DigiModes
         private volatile bool _run;
         private volatile bool _halt;
         private Task _decodeTask = Task.CompletedTask;
-        private DateTime _lastDecodedSlot;
+        // the clock (the self-test runs the engine on a simulated one), and decoding on the engine's own thread (self-test)
+        public Func<DateTime> Now = () => DateTime.UtcNow;
+        public bool SyncDecode;
+
+        private DateTime _earlySlot = DateTime.MinValue, _finalSlot = DateTime.MinValue;    // the last period given each pass
+        private DateTime _sequencedSlot = DateTime.MinValue;    // the latest period whose decodes the QSO has seen
+        private readonly Dictionary<long, HashSet<string>> _shown = new Dictionary<long, HashSet<string>>();   // per period: messages reported
         private DateTime _lastTxSlot = DateTime.MinValue;
         private readonly HashSet<long> _txSlots = new HashSet<long>();     // periods (by start ticks) we sent in
         private DateTime _lastActivity = DateTime.UtcNow;
@@ -65,7 +71,7 @@ namespace Kainos.DigiModes
         public bool Transmitting { get; private set; }
         public double RecorderNewest { get { return _rec.NewestTime; } }
 
-        public void Activity() { _lastActivity = DateTime.UtcNow; }
+        public void Activity() { _lastActivity = Now(); }
 
         public void Start()
         {
@@ -120,71 +126,119 @@ namespace Kainos.DigiModes
 
         private void work()
         {
-            float[] buf = new float[16384];
             while (_run)
             {
-                try
-                {
-                    // receive
-                    if (_tapOk || ensureTap())
-                    {
-                        int rate = _host.Audio.RxRate, n;
-                        _rec.LatencyCorrection = RxLatencyMs / 1000.0;
-                        while ((n = _host.Audio.ReadRx(buf, buf.Length)) > 0) _rec.Add(buf, n, rate, DateTime.UtcNow);
-                        scheduleDecode();
-                    }
-                    // transmit
-                    txTick();
-                }
-                catch (Exception ex) { _host.Log("engine: " + ex); Thread.Sleep(200); }
+                Step();
                 Thread.Sleep(Transmitting ? 10 : 20);
             }
         }
 
+        private readonly float[] _buf = new float[16384];
+
+        // one turn of the engine: take the audio, decode what's due, transmit (the self-test calls this directly)
+        public void Step()
+        {
+            try
+            {
+                if (_tapOk || ensureTap())
+                {
+                    int rate = _host.Audio.RxRate, n;
+                    _rec.LatencyCorrection = RxLatencyMs / 1000.0;
+                    while ((n = _host.Audio.ReadRx(_buf, _buf.Length)) > 0) _rec.Add(_buf, n, rate, Now());
+                    scheduleDecode();
+                }
+                txTick();
+            }
+            catch (Exception ex) { _host.Log("engine: " + ex); if (!SyncDecode) Thread.Sleep(200); }
+        }
+
+        public bool Decoding { get { return !_decodeTask.IsCompleted; } }
+
         // ---- decoding ----
+        //
+        // Two passes a period, as WSJT-X does: an early one as soon as a signal at DT 0 has ended (FT8 13.6 s, FT4 5.9 s
+        // into the period), so the reply is chosen before the next period starts, and a final one at the period's end
+        // for stations late in time. The final pass reports only what the early one didn't.
+
+        private static double earlyAt(FtxMode m) { return m == FtxMode.FT8 ? 13.6 : 5.9; }
+        private static DateTime slotTime(double s) { return new DateTime((long)Math.Round(s * 1e7), DateTimeKind.Utc); }
 
         private void scheduleDecode()
         {
             double newest = _rec.NewestTime;
-            if (double.IsNaN(newest)) return;
+            if (double.IsNaN(newest) || !_decodeTask.IsCompleted) return;
             FtxMode mode = Mode;
             double p = FtxModes.Period(mode);
-            // the period that has just ended (decoded once its last 0.2 s is in)
-            double s = Math.Floor((newest + 0.2) / p) * p - p;
-            DateTime slot = new DateTime((long)Math.Round(s * 1e7), DateTimeKind.Utc);
-            if (slot <= _lastDecodedSlot || !_decodeTask.IsCompleted) return;
-            _lastDecodedSlot = slot;
+
+            // the period being received: its early pass
+            double sCur = Math.Floor(newest / p) * p;
+            DateTime cur = slotTime(sCur);
+            if (newest - sCur >= earlyAt(mode) && cur > _earlySlot)
+            {
+                _earlySlot = cur;
+                runPass(sCur, cur, mode, true);
+                return;
+            }
+            // the period that has just ended (its last 0.2 s in): the final pass
+            double sPrev = Math.Floor((newest + 0.2) / p) * p - p;
+            DateTime prev = slotTime(sPrev);
+            if (prev > _finalSlot)
+            {
+                _finalSlot = prev;
+                runPass(sPrev, prev, mode, false);
+            }
+        }
+
+        private void runPass(double s, DateTime slot, FtxMode mode, bool early)
+        {
             bool sent;
             lock (_txSlots) sent = _txSlots.Contains(slot.Ticks);
-            if (sent) { afterPeriod(slot, mode, new List<DecodeLine>()); return; }
-
-            double missing;
+            if (sent) { deliver(slot, mode, new List<DecodeLine>()); return; }      // ours: nothing to decode, but the QSO moves on
+            double p = FtxModes.Period(mode), missing;
             float[] samples = _rec.Cut(s, p, out missing);
             if (samples == null || missing > p * 0.5) return;           // just started: not enough of the period
             int rxf = RxFreq;
             string my = Qso.MyCall, grid = Qso.MyGrid, his = Qso.HisCall;
-            _decodeTask = Task.Run(() =>
+            Action job = () =>
             {
                 string why;
-                List<DecodeLine> res = Decoder.Decode(mode, slot, samples, rxf, my, grid, his, out why);
+                // the early pass at depth 2 at most (about 0.5 s; depth 3 takes 1.7 s), so it's done before the next period
+                List<DecodeLine> res = Decoder.Decode(mode, slot, samples, rxf, my, grid, his, out why, early ? Math.Min(2, Decoder.Depth) : Decoder.Depth);
                 if (why != null) Status?.Invoke(why);
-                afterPeriod(slot, mode, res);
-            });
+                deliver(slot, mode, res);
+            };
+            if (SyncDecode) { job(); return; }
+            _decodeTask = Task.Run(job);
         }
 
-        private void afterPeriod(DateTime slot, FtxMode mode, List<DecodeLine> res)
+        private void deliver(DateTime slot, FtxMode mode, List<DecodeLine> res)
         {
-            try { Decoded?.Invoke(slot, mode, res); } catch (Exception ex) { _host.Log("decoded handler: " + ex); }
-            string sent = _lastSent;
-            _lastSent = null;
+            List<DecodeLine> fresh;
+            bool first;
+            lock (_shown)
+            {
+                HashSet<string> seen;
+                first = !_shown.TryGetValue(slot.Ticks, out seen);
+                if (first) _shown[slot.Ticks] = seen = new HashSet<string>();
+                fresh = res.Where(d => seen.Add(d.Message)).ToList();
+                foreach (long old in _shown.Keys.Where(k => k < slot.Ticks - TimeSpan.FromMinutes(2).Ticks).ToList()) _shown.Remove(old);
+            }
+            if (fresh.Count > 0 || first)
+                try { Decoded?.Invoke(slot, mode, fresh); } catch (Exception ex) { _host.Log("decoded handler: " + ex); }
             lock (Qso)
             {
-                bool changed = Qso.Sequence(res, sent);
+                string sent = null;
+                if (slot > _sequencedSlot) { sent = _lastSent; _lastSent = null; _sequencedSlot = slot; }
+                bool changed = Qso.Sequence(fresh, sent);
                 // the QSO is over (73 sent or received): stop, as WSJT-X does; calling CQ again starts afresh
                 if (Qso.Done && StopAfter73 && TxEnabled) { TxEnabled = false; changed = true; }
                 if (changed) Changed?.Invoke();
             }
         }
+
+        // how long into our period transmitting waits for the decode of the period before it (so the reply answers it),
+        // before starting anyway with what it has
+        private static double maxWait(FtxMode m) { return m == FtxMode.FT8 ? 1.2 : 0.6; }
 
         // ---- transmitting ----
 
@@ -196,7 +250,7 @@ namespace Kainos.DigiModes
 
         private void txTick()
         {
-            DateTime now = DateTime.UtcNow;
+            DateTime now = Now();
             if (Transmitting) { feedTx(now); return; }
             _halt = false;
             if (!TxEnabled) return;
@@ -218,6 +272,10 @@ namespace Kainos.DigiModes
             double into = t - s;
             DateTime slot = new DateTime((long)Math.Round(s * 1e7), DateTimeKind.Utc);
             if (!mine || slot == _lastTxSlot || into > 2.0) return;      // not ours, already sent, or too late to start
+            // the other station's period must be decoded first, so the message answers what he just sent
+            DateTime prevSlot = slotTime(s - p);
+            bool heard = _sequencedSlot >= prevSlot;
+            if (!heard && _tapOk && into < maxWait(mode)) return;
             if (!_host.Radio.PowerOn) { Status?.Invoke("The radio is off"); TxEnabled = false; Changed?.Invoke(); return; }
             string m = _host.Radio.Mode(_host.Radio.TxReceiver);
             if (m != "DIGU" && m != "USB") { Status?.Invoke("Transmit needs DIGU (or USB) on the transmitting VFO"); TxEnabled = false; Changed?.Invoke(); return; }

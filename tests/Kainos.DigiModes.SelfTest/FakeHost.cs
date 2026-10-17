@@ -44,7 +44,15 @@ namespace Kainos.DigiModes.SelfTest
         public string GetSetting(string key, string fallback) { string v; return Settings.TryGetValue(key, out v) ? v : fallback; }
         public void SetSetting(string key, string value) { Settings[key] = value; }
         public void Log(string message) { lock (LogLines) LogLines.Add(message); }
-        public void BeginInvoke(Action action) { if (Window != null && Window.IsHandleCreated) Window.BeginInvoke(action); }
+        public void BeginInvoke(Action action)
+        {
+            if (Window != null && Window.IsHandleCreated) Window.BeginInvoke(action);
+            else if (Window == null) action();          // no window (the timed QSO test): at once
+        }
+
+        // the timed QSO test: a simulated clock and what's on the air
+        public SimAir Air;
+        public Func<DateTime> Clock;
 
         public bool PowerOn { get { return true; } }
         public bool Transmitting { get { return Mox; } }
@@ -58,7 +66,7 @@ namespace Kainos.DigiModes.SelfTest
         public bool AcquireRx(int rx, Action released, out string problem) { problem = null; return true; }
         public void ReleaseRx() { }
         public int RxRate { get { return 48000; } }
-        public int ReadRx(float[] dst, int max) { return 0; }
+        public int ReadRx(float[] dst, int max) { return Air != null && Clock != null ? Air.Read(dst, max, Clock()) : 0; }
         public int TxRate { get { return 48000; } }
         public void TxStart() { }
         public int TxWrite(float[] src, int n) { return n; }
@@ -88,6 +96,45 @@ namespace Kainos.DigiModes.SelfTest
             using (Font f = Font(fontPx, true)) TextRenderer.DrawText(g, text, f, Rectangle.Round(r), on ? Gold : Dim);
         }
         public void Style(Control root) { root.BackColor = Bg; root.ForeColor = Text; }
+    }
+
+    // The receiver's audio for the timed test: noise, and scripted transmissions (a waveform starting at a time)
+    internal class SimAir
+    {
+        private readonly List<KeyValuePair<DateTime, float[]>> _tx = new List<KeyValuePair<DateTime, float[]>>();
+        private readonly Random _rnd = new Random(3);
+        private DateTime _readTo;
+        public const int Rate = 48000;
+
+        public SimAir(DateTime start) { _readTo = start; }
+
+        public void Add(DateTime at, float[] wave) { _tx.Add(new KeyValuePair<DateTime, float[]>(at, wave)); }
+
+        // the samples from the last read up to `now`
+        public int Read(float[] dst, int max, DateTime now)
+        {
+            int n = (int)Math.Min(max, Math.Floor((now - _readTo).TotalSeconds * Rate));
+            if (n <= 0) return 0;
+            for (int i = 0; i < n; i++)
+            {
+                DateTime t = _readTo.AddTicks((long)(i * 1e7 / Rate));
+                double s = gauss() * 0.02;
+                foreach (KeyValuePair<DateTime, float[]> kv in _tx)
+                {
+                    long k = (long)Math.Round((t - kv.Key).TotalSeconds * Rate);
+                    if (k >= 0 && k < kv.Value.Length) s += kv.Value[k] * 0.05;
+                }
+                dst[i] = (float)s;
+            }
+            _readTo = _readTo.AddTicks((long)(n * 1e7 / Rate));
+            return n;
+        }
+
+        private double gauss()
+        {
+            double u1 = 1.0 - _rnd.NextDouble(), u2 = _rnd.NextDouble();
+            return Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Cos(2 * Math.PI * u2);
+        }
     }
 
     internal class FakeMenu : IKainosMenuItem

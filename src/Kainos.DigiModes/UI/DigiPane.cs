@@ -38,6 +38,9 @@ namespace Kainos.DigiModes.UI
         private string _statusText = "";
         private DateTime _statusAt;
         private bool _syncing, _built;
+        private DateTime _shownSlot;
+        private bool _headed;
+        private readonly List<DecodeLine> _slotDecodes = new List<DecodeLine>();
 
         public event Action PopToggled;
 
@@ -270,10 +273,13 @@ namespace Kainos.DigiModes.UI
 
         private void showDecodes(DateTime slot, FtxMode mode, List<DecodeLine> list)
         {
-            _strip.SetDecodes(list);
+            // a period comes in two passes (early and final): its decodes stay together under one heading
+            if (slot != _shownSlot) { _shownSlot = slot; _slotDecodes.Clear(); _headed = false; }
+            _slotDecodes.AddRange(list);
+            _strip.SetDecodes(new List<DecodeLine>(_slotDecodes));
             if (list.Count == 0) return;
             string my = _e.Qso.MyCall, his = _e.Qso.HisCall;
-            _activity.Separator(slot.ToString("HH:mm:ss") + " " + mode);
+            if (!_headed) { _activity.Separator(slot.ToString("HH:mm:ss") + " " + mode); _headed = true; }
             foreach (DecodeLine d in list.OrderBy(x => x.Freq))
             {
                 string[] w = d.Message.Split(' ');

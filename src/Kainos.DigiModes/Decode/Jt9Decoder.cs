@@ -1,4 +1,4 @@
-/*  Jt9Decoder.cs
+﻿/*  Jt9Decoder.cs
 
 Decoding with jt9, the decoder of WSJT-X (and its forks), run once per period on a 12 kHz WAV of that period, as
 WSJT-X's own command-line mode does:  jt9 -8 (FT8) or -5 (FT4) -d depth ... yymmdd_hhmmss.wav
@@ -49,7 +49,7 @@ namespace Kainos.DigiModes.Decode
         public bool Available { get { return !string.IsNullOrEmpty(Jt9Exe) && File.Exists(Jt9Exe); } }
 
         // samples: the period at 12 kHz; returns the decodes (none on failure, with why in problem)
-        public List<DecodeLine> Decode(FtxMode mode, DateTime slotUtc, float[] samples, int rxFreq, string myCall, string myGrid, string hisCall, out string problem)
+        public List<DecodeLine> Decode(FtxMode mode, DateTime slotUtc, float[] samples, int rxFreq, string myCall, string myGrid, string hisCall, out string problem, int depth = 0)
         {
             problem = null;
             List<DecodeLine> res = new List<DecodeLine>();
@@ -62,7 +62,7 @@ namespace Kainos.DigiModes.Decode
                 List<string> a = new List<string>
                 {
                     mode == FtxMode.FT8 ? "-8" : "-5",
-                    "-d", Depth.ToString(CultureInfo.InvariantCulture),
+                    "-d", (depth > 0 ? depth : Depth).ToString(CultureInfo.InvariantCulture),
                     "-f", rxFreq.ToString(CultureInfo.InvariantCulture),
                     "-L", LowHz.ToString(CultureInfo.InvariantCulture),
                     "-H", HighHz.ToString(CultureInfo.InvariantCulture),

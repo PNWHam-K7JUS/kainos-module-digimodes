@@ -1,4 +1,4 @@
-/*  Program.cs (self-test)
+﻿/*  Program.cs (self-test)
 
 Checks the module without a radio: the encoder against WSJT-X's ft8code, and the whole path (tones -> GFSK at
 48 kHz -> noise -> 12 kHz resampler -> jt9) decoding what was sent, for FT8 and FT4; the QSO sequencer; parsing.
@@ -144,6 +144,66 @@ namespace Kainos.DigiModes.SelfTest
                     new DateTime(2026, 10, 16, 12, 0, 15, DateTimeKind.Utc), FtxMode.FT8);
                 check(p.Count == 2 && p[0].Ap && p[0].Message == "K7JUS K1ABC FN42" && p[1].Snr == -3 && p[1].Freq == 456, "jt9 output parsed");
             }
+
+            // 8. a whole QSO in simulated time: K1ABC calls CQ, we answer it, and each of our replies must go out in the
+            // very next period (not a period late), starting on time; then transmitting stops after our 73
+            // (in real time, with decoding in the background as in Kainos; FT8 and FT4 side by side, about 2 minutes)
+            List<KeyValuePair<bool, string>> qsoResults = new List<KeyValuePair<bool, string>>();
+            System.Threading.Tasks.Parallel.ForEach(new[] { FtxMode.FT8, FtxMode.FT4 }, mode =>
+            {
+                double p = FtxModes.Period(mode);
+                DateTime t0 = new DateTime(2026, 10, 16, 12, 0, 0, DateTimeKind.Utc);
+                DateTime vnow = t0.AddSeconds(-1), vstart = vnow;
+                SimAir air = new SimAir(vnow);
+                FakeHost host = new FakeHost(bin, Path.Combine(work, "qso-" + mode)) { Air = air, Clock = () => vnow, Window = null };
+                DigiEngine eng = new DigiEngine(host) { Now = () => vnow, Ft8CodeExe = ft8code, Mode = mode, RxFreq = 1000, TxFreq = 1600, HoldTx = true };
+                eng.Decoder.Jt9Exe = jt9;
+                eng.Decoder.WorkFolder = Path.Combine(work, "qso-jt9-" + mode);
+                eng.Qso.MyCall = "K7JUS"; eng.Qso.MyGrid = "CN87";
+                eng.Activity();
+
+                // what K1ABC sends, in the even periods, at 1000 Hz
+                string[] his = { "CQ K1ABC FN42", null, "K7JUS K1ABC -10", null, "K7JUS K1ABC RR73" };
+                for (int i = 0; i < his.Length; i++)
+                {
+                    if (his[i] == null) continue;
+                    string why;
+                    PackedMessage pm = Pack77.Pack(ft8code, his[i], out why);
+                    byte[] pl = FtxEncoder.PayloadFromBits(pm.Bits77);
+                    byte[] tn = mode == FtxMode.FT8 ? FtxEncoder.Ft8Tones(pl) : FtxEncoder.Ft4Tones(pl);
+                    air.Add(t0.AddSeconds(i * p + FtxModes.TxStart(mode)), FtxModulator.Synthesize(mode, tn, 1000, SimAir.Rate));
+                }
+
+                List<string> sent = new List<string>();
+                bool answered = false;
+                eng.TxStarted += (slot, msg) => sent.Add(((int)Math.Round((slot - t0).TotalSeconds / p)) + ":" + msg + "@" + (vnow - slot).TotalSeconds.ToString("0.00"));
+                eng.Decoded += (slot, m, list) =>
+                {
+                    DecodeLine cq = list.FirstOrDefault(d => d.Message == "CQ K1ABC FN42");
+                    if (cq == null || answered) return;
+                    answered = true;                    // the operator double-clicks the CQ (as DigiPane.answer does)
+                    lock (eng.Qso) eng.Qso.Answer(cq);
+                    eng.TxSecond = true;
+                    eng.TxEnabled = true;
+                };
+                System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
+                while (vnow < t0.AddSeconds(8 * p))
+                {
+                    eng.Step();
+                    System.Threading.Thread.Sleep(15);
+                    vnow = vstart + sw.Elapsed;
+                }
+                while (eng.Decoding) System.Threading.Thread.Sleep(50);
+                string got = string.Join("  |  ", sent);
+                Func<int, string, bool> at = (k, m) => sent.Any(x => x.StartsWith(k + ":" + m + "@") && double.Parse(x.Substring(x.IndexOf('@') + 1)) <= 0.5);
+                bool ok = sent.Count == 3 && at(1, "K1ABC K7JUS CN87") && sent.Count(x => x.StartsWith("3:K1ABC K7JUS R")) == 1 && at(3, sent.First(x => x.StartsWith("3:")).Split(':', '@')[1]) && at(5, "K1ABC K7JUS 73");
+                lock (qsoResults)
+                {
+                    qsoResults.Add(new KeyValuePair<bool, string>(ok, mode + " QSO in real time, each reply in the next period, on time: " + got));
+                    qsoResults.Add(new KeyValuePair<bool, string>(!eng.TxEnabled, mode + " transmitting stops after 73"));
+                }
+            });
+            foreach (KeyValuePair<bool, string> r in qsoResults) check(r.Key, r.Value);
 
             // 7. the module in a stand-in Kainos: start, open the pane, run its timers, resize, close, stop
             {
