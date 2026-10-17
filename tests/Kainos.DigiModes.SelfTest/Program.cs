@@ -146,6 +146,17 @@ namespace Kainos.DigiModes.SelfTest
                 check(p.Count == 2 && p[0].Ap && p[0].Message == "K7JUS K1ABC FN42" && p[1].Snr == -3 && p[1].Freq == 456, "jt9 output parsed");
             }
 
+            // 10. the waterfall's FFT: a 1000 Hz tone peaks in its bin (1000 * 2048 / 12000 = 170.7)
+            {
+                SpectrumMaker sm = new SpectrumMaker();
+                float[] tone = new float[SpectrumMaker.N * 2];
+                for (int i = 0; i < tone.Length; i++) tone[i] = (float)Math.Sin(2 * Math.PI * 1000 * i / 12000.0);
+                List<float[]> lines = new List<float[]>();
+                sm.Push(tone, tone.Length, lines);
+                int peak = lines.Count > 0 ? Array.IndexOf(lines[0], lines[0].Max()) : -1;
+                check(lines.Count == 2 && (peak == 170 || peak == 171), "waterfall FFT: 1000 Hz in bin " + peak);
+            }
+
             // 9. WSJT-X UDP: a stand-in GridTracker on a local port gets our heartbeat, a decode and a logged QSO in
             // WSJT-X's format, and its Reply and Halt Tx come back to us
             {
@@ -296,6 +307,24 @@ namespace Kainos.DigiModes.SelfTest
                         stage = "fill";
                         foreach (UI.DecodeList l in all(w).OfType<UI.DecodeList>())
                             for (int i = 0; i < 80; i++) l.Add(new UI.DecodeRow { Text = "120015 -12  0.3 1234  CQ K1ABC FN42", Kind = i % 5 == 0 ? UI.RowKind.Cq : UI.RowKind.Normal });
+                        // the waterfall: a signal at 1500 Hz shows bright where 1500 Hz is, dark at 500 Hz
+                        stage = "waterfall";
+                        UI.FreqStrip strip = all(w).OfType<UI.FreqStrip>().First();
+                        for (int i = 0; i < 60; i++)
+                        {
+                            float[] line = new float[SpectrumMaker.Bins];
+                            for (int k = 0; k < line.Length; k++) line[k] = -60 + (float)(gauss(rnd) * 2);
+                            for (int k = 254; k < 262; k++) line[k] = -20;
+                            strip.AddLine(line);
+                        }
+                        pump(200);
+                        using (System.Drawing.Bitmap shot = new System.Drawing.Bitmap(strip.Width, strip.Height))
+                        {
+                            strip.DrawToBitmap(shot, new System.Drawing.Rectangle(0, 0, strip.Width, strip.Height));
+                            int yy = strip.Height / 2;
+                            System.Drawing.Color hot = shot.GetPixel((int)(1515.0 / 3000 * (strip.Width - 1)), yy), cold = shot.GetPixel((int)(500.0 / 3000 * (strip.Width - 1)) + 3, yy);
+                            check(hot.GetBrightness() > cold.GetBrightness() + 0.3f, "waterfall shows a signal where it is (" + hot + " vs " + cold + ")");
+                        }
                         foreach (int width in new[] { 1080, 1400 })
                         {
                             w.ClientSize = new System.Drawing.Size(width, 236);

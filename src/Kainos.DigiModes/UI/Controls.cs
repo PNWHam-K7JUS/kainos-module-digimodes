@@ -220,10 +220,10 @@ namespace Kainos.DigiModes.UI
         }
     }
 
-    // 0 - 3000 Hz of audio (what's inside the DIGU passband), like a one-line waterfall: each station decoded in the
-    // last period is a block at its audio frequency, as wide as its signal, labelled with its callsign (gold: calling CQ).
-    // RX is the gold line, TX the red dashed one. Left click sets RX, right click (or Shift + click) sets TX; hovering
-    // over a block shows its message.
+    // 0 - 3000 Hz of audio (what's inside the DIGU passband): a waterfall of the receiver's audio (newest at the top),
+    // and along the top each station decoded in the last period as a block at its audio frequency, as wide as its
+    // signal, labelled with its callsign (gold: calling CQ). RX is the gold line, TX the red dashed one. Left click sets
+    // RX, right click (or Shift + click) sets TX; hovering over a block shows its message.
     internal class FreqStrip : Control
     {
         private readonly IKainosTheme _t;
@@ -232,7 +232,7 @@ namespace Kainos.DigiModes.UI
         private List<DecodeLine> _last = new List<DecodeLine>();
         private readonly ToolTip _tip = new ToolTip { InitialDelay = 200, ReshowDelay = 100 };
         private string _tipText = "";
-        private const string Hint = "Audio frequency (Hz) in your DIGU passband: a block is a station heard in the last period (gold = calling CQ).\r\n" +
+        private const string Hint = "Waterfall of the audio (Hz) in your DIGU passband; along the top, the stations heard in the last period (gold = calling CQ).\r\n" +
                                     "Left-click: receive here (RX, gold line).   Right-click or Shift+click: transmit here (TX, red line).";
 
         public event Action<int> RxClicked, TxClicked;
@@ -246,7 +246,7 @@ namespace Kainos.DigiModes.UI
             _tip.SetToolTip(this, Hint);
         }
 
-        protected override void Dispose(bool disposing) { if (disposing) _tip.Dispose(); base.Dispose(disposing); }
+        protected override void Dispose(bool disposing) { if (disposing) { _tip.Dispose(); if (_wf != null) _wf.Dispose(); } base.Dispose(disposing); }
 
         public void SetDecodes(List<DecodeLine> d) { _last = d ?? new List<DecodeLine>(); Invalidate(); }
 
@@ -277,12 +277,95 @@ namespace Kainos.DigiModes.UI
             if (t != _tipText) { _tipText = t; _tip.SetToolTip(this, t); }
         }
 
+        // ---- the waterfall: newest line at the top, 0 - 3000 Hz across, scrolled a row a line ----
+
+        private const int WfRows = 400;
+        private readonly int _wfCols = SpectrumMaker.Bins;
+        private int[] _px;
+        private Bitmap _wf;
+        private bool _wfDirty;
+        private int _wfLines;
+        private float _floor = float.NaN;
+        public float RangeDb = 30;          // the colours span this much above the noise floor
+        private static int[] _palette;
+
+        private int labelH { get { return _t.S(15); } }
+        private int scaleH { get { return _t.S(11); } }
+        private Rectangle wfRect { get { return new Rectangle(0, labelH, Width, Math.Max(0, Height - labelH - scaleH)); } }
+
+        // a spectrum line (dB, 0 - 3000 Hz), on the UI thread
+        public void AddLine(float[] db)
+        {
+            if (db == null || db.Length < _wfCols) return;
+            if (_px == null) _px = new int[_wfCols * WfRows];
+            if (_palette == null) _palette = makePalette(_t);
+            // the noise floor: a low percentile of the line, followed slowly (quickly for the first lines)
+            float[] sorted = (float[])db.Clone();
+            Array.Sort(sorted);
+            float f = sorted[sorted.Length / 5];
+            _floor = float.IsNaN(_floor) ? f : _floor + (f - _floor) * (_wfLines < 10 ? 0.5f : 0.05f);
+            _wfLines++;
+            Array.Copy(_px, 0, _px, _wfCols, _wfCols * (WfRows - 1));
+            for (int i = 0; i < _wfCols; i++)
+            {
+                float v = (db[i] - _floor + 3) / RangeDb;
+                int k = (int)(Math.Max(0, Math.Min(1, v)) * 255);
+                _px[i] = _palette[k];
+            }
+            _wfDirty = true;
+            Invalidate(wfRect);
+        }
+
+        public void ClearWaterfall() { if (_px != null) Array.Clear(_px, 0, _px.Length); _floor = float.NaN; _wfLines = 0; _wfDirty = true; Invalidate(); }
+
+        // the Kainos colours: navy, deep blue, ice, gold, white
+        private static int[] makePalette(IKainosTheme t)
+        {
+            Color[] stops = { t.Bg, Color.FromArgb(12, 44, 92), t.Ice, t.Gold, Color.White };
+            double[] at = { 0, 0.30, 0.62, 0.86, 1 };
+            int[] p = new int[256];
+            for (int i = 0; i < 256; i++)
+            {
+                double v = i / 255.0;
+                int s = 0;
+                while (s < stops.Length - 2 && v > at[s + 1]) s++;
+                double u = (v - at[s]) / (at[s + 1] - at[s]);
+                Color a = stops[s], b = stops[s + 1];
+                int r = (int)(a.R + (b.R - a.R) * u), g = (int)(a.G + (b.G - a.G) * u), bl = (int)(a.B + (b.B - a.B) * u);
+                p[i] = unchecked((int)0xff000000) | (r << 16) | (g << 8) | bl;
+            }
+            return p;
+        }
+
+        private void drawWaterfall(Graphics g)
+        {
+            Rectangle r = wfRect;
+            if (r.Height <= 0) return;
+            using (Brush bg = new SolidBrush(_t.Bg)) g.FillRectangle(bg, r);
+            if (_px == null) return;
+            if (_wf == null) _wf = new Bitmap(_wfCols, WfRows, System.Drawing.Imaging.PixelFormat.Format32bppRgb);
+            if (_wfDirty)
+            {
+                System.Drawing.Imaging.BitmapData bd = _wf.LockBits(new Rectangle(0, 0, _wfCols, WfRows), System.Drawing.Imaging.ImageLockMode.WriteOnly, _wf.PixelFormat);
+                System.Runtime.InteropServices.Marshal.Copy(_px, 0, bd.Scan0, _px.Length);
+                _wf.UnlockBits(bd);
+                _wfDirty = false;
+            }
+            g.InterpolationMode = InterpolationMode.NearestNeighbor;
+            g.PixelOffsetMode = PixelOffsetMode.Half;
+            // one row a pixel; across, stretched to the width
+            int rows = Math.Min(WfRows, r.Height);
+            g.DrawImage(_wf, new Rectangle(r.X, r.Y, r.Width, rows), new Rectangle(0, 0, _wfCols, rows), GraphicsUnit.Pixel);
+            g.PixelOffsetMode = PixelOffsetMode.Default;
+        }
+
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
             g.Clear(_t.Surface);
+            drawWaterfall(g);
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
-            int h = Height, scaleH = _t.S(11), blockH = h - scaleH - 1;
+            int h = Height;
             using (Font f = _t.Font(_t.S(9.5f), false))
             using (Font call = _t.Font(_t.S(9.5f), true))
             using (Brush fb = new SolidBrush(_t.Faint))
@@ -296,18 +379,18 @@ namespace Kainos.DigiModes.UI
                     g.DrawLine(grid, xx, h - _t.S(4), xx, h);
                     g.DrawString(hz.ToString(), f, fb, xx + 2, h - scaleH - 1);
                 }
-                // the stations, with their callsigns where there's room
+                // the stations of the last period along the top, with their callsigns where there's room
                 float bw = Math.Max(2, x(BandwidthHz));
                 foreach (DecodeLine d in _last.OrderBy(l => l.Freq))
                 {
                     bool cq = d.Message.StartsWith("CQ ");
                     Color c = cq ? _t.Gold : _t.Ice;
                     float bx = x(d.Freq);
-                    using (Brush b = new SolidBrush(Color.FromArgb(110, c))) g.FillRectangle(b, bx, 1, bw, blockH);
+                    using (Brush b = new SolidBrush(Color.FromArgb(150, c))) g.FillRectangle(b, bx, 1, bw, labelH - 2);
                     string who = Sender(d.Message);
                     SizeF sz = g.MeasureString(who, call);
                     if (sz.Width <= bw + _t.S(30))
-                        using (Brush tb = new SolidBrush(cq ? _t.Gold : _t.Text)) g.DrawString(who, call, tb, bx + 1, 1 + (blockH - sz.Height) / 2);
+                        using (Brush tb = new SolidBrush(cq ? _t.Gold : _t.Text)) g.DrawString(who, call, tb, bx + 1, (labelH - sz.Height) / 2);
                 }
                 // RX and TX, tagged at the top
                 using (Brush rb = new SolidBrush(Color.FromArgb(60, _t.Gold))) g.FillRectangle(rb, x(Rx), 0, bw, h);

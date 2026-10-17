@@ -145,6 +145,7 @@ namespace Kainos.DigiModes
                     int rate = _host.Audio.RxRate, n;
                     _rec.LatencyCorrection = RxLatencyMs / 1000.0;
                     while ((n = _host.Audio.ReadRx(_buf, _buf.Length)) > 0) _rec.Add(_buf, n, rate, Now());
+                    spectrum();
                     scheduleDecode();
                 }
                 txTick();
@@ -153,6 +154,26 @@ namespace Kainos.DigiModes
         }
 
         public bool Decoding { get { return !_decodeTask.IsCompleted; } }
+
+        // ---- the waterfall: a spectrum line about 6 times a second (only while someone listens) ----
+
+        public event Action<float[]> SpectrumLine;
+        private readonly SpectrumMaker _spec = new SpectrumMaker();
+        private readonly float[] _specBuf = new float[12000];
+        private readonly List<float[]> _specLines = new List<float[]>();
+        private long _specPos = -1;
+
+        private void spectrum()
+        {
+            if (SpectrumLine == null) return;
+            if (_specPos < 0) _specPos = long.MaxValue;         // start from now
+            int n;
+            while ((n = _rec.Since(ref _specPos, _specBuf)) > 0) _spec.Push(_specBuf, n, _specLines);
+            if (_specLines.Count == 0) return;
+            // while transmitting the receiver hears nothing useful: the waterfall pauses
+            if (!Transmitting) foreach (float[] l in _specLines) SpectrumLine?.Invoke(l);
+            _specLines.Clear();
+        }
 
         // ---- decoding ----
         //

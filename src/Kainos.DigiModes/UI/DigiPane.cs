@@ -141,15 +141,18 @@ namespace Kainos.DigiModes.UI
             _status.SetBounds(x + pad, y, Math.Max(0, right - x - pad), bh);
 
             y += bh + pad;
-            _strip.SetBounds(pad, y, Width - 2 * pad, _t.S(26));
-            y += _t.S(26) + pad;
-            int h = Math.Max(_t.S(60), Height - y - pad);
+            // the QSO panel down the right; on the left the waterfall (about a third of the height, taller when the pane
+            // is dragged taller) over band activity and the RX frequency list
             int qsoW = _t.S(270);
-            int listW = Width - 3 * pad - qsoW;
-            int actW = (int)(listW * 0.58);
+            int leftW = Width - 3 * pad - qsoW;
+            _qso.SetBounds(Width - pad - qsoW, y, qsoW, Math.Max(_t.S(60), Height - y - pad));
+            int wfH = Math.Max(_t.S(48), Math.Min(_t.S(220), (Height - y) * 34 / 100));
+            _strip.SetBounds(pad, y, leftW, wfH);
+            y += wfH + pad;
+            int h = Math.Max(_t.S(40), Height - y - pad);
+            int actW = (int)(leftW * 0.58);
             _activity.SetBounds(pad, y, actW, h);
-            _rxList.SetBounds(pad + actW + pad, y, listW - actW - pad, h);
-            _qso.SetBounds(Width - pad - qsoW, y, qsoW, h);
+            _rxList.SetBounds(pad + actW + pad, y, leftW - actW - pad, h);
             layoutQso();
         }
 
@@ -215,6 +218,7 @@ namespace Kainos.DigiModes.UI
             _clear.Click += (s, e) => { _e.Activity(); lock (_e.Qso) _e.Qso.Clear(); refreshAll(); };
 
             _e.Decoded += (slot, mode, list) => _host.BeginInvoke(() => showDecodes(slot, mode, list));
+            _e.SpectrumLine += line => _host.BeginInvoke(() => _strip.AddLine(line));
             _e.TxStarted += (slot, msg) => _host.BeginInvoke(() =>
             {
                 string line = slot.ToString("HHmmss") + "  Tx " + _e.TxFreq.ToString().PadLeft(4) + "  " + msg;

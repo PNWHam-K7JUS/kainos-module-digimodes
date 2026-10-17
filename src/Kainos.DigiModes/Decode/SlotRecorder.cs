@@ -143,6 +143,19 @@ namespace Kainos.DigiModes.Decode
             get { lock (_lock) return double.IsNaN(_t0) ? double.NaN : _t0 + _written / 12000.0 - LatencyCorrection; }
         }
 
+        // the 12 kHz samples written since `pos` (at most dst.Length), moving pos on; for the waterfall
+        public int Since(ref long pos, float[] dst)
+        {
+            lock (_lock)
+            {
+                if (pos > _written || pos < _written - Capacity) pos = Math.Max(0, _written - dst.Length);
+                int n = (int)Math.Min(dst.Length, _written - pos);
+                for (int i = 0; i < n; i++) dst[i] = _ring[(pos + i) % Capacity];
+                pos += n;
+                return n;
+            }
+        }
+
         // the samples from startUtc for `seconds` (zeros where there's nothing), or null if it isn't all in the ring
         public float[] Cut(double startUtc, double seconds, out double missing)
         {
