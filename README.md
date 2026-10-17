@@ -42,7 +42,7 @@ To test a build before it's released, use **Install from file...** with the zip 
 | `Qso/QsoEngine.cs` | Generates the six messages and runs the auto-sequencing. Logging is in `AdifLog.cs`. |
 | `DigiEngine.cs` | The period clock and decode schedule, plus timed transmit through Kainos's transmit audio feed. |
 | `UI/` | The pane, drawn in the Kainos colours. |
-| `UI/CrispHost.cs` | Kainos isn't DPI-aware, so Windows enlarges it as a picture at 125 % / 150 %. Windows won't let a per-monitor-aware child window into a DPI-unaware one (even with `SetThreadDpiHostingBehavior` mixed), so the waterfall goes in a borderless per-monitor-aware window of its own, owned by the pane's form and kept over a placeholder in the pane (clipped to what the pane shows, hidden with it). The waterfall then works in screen pixels and scales its sizes by `CrispHost.DpiScale`. |
+| Sharp waterfall | Kainos isn't DPI-aware, so Windows enlarges it as a picture at 125 % / 150 %. The waterfall sits in Kainos's `KainosCrispHost` (Kainos.ModuleApi, Kainos 1.0.11 and later), which puts it in a per-monitor-aware window of its own, kept over the pane. The waterfall works in screen pixels and scales its sizes by `KainosCrispHost.DpiScale`. |
 
 ## Building
 

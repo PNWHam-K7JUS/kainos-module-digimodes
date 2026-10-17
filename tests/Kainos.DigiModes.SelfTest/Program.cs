@@ -410,8 +410,8 @@ namespace Kainos.DigiModes.SelfTest
                             for (int i = 0; i < 80; i++) l.Add(new UI.DecodeRow { Text = "120015 -12  0.3 1234  CQ K1ABC FN42", Kind = i % 5 == 0 ? UI.RowKind.Cq : UI.RowKind.Normal });
                         // the waterfall: a signal at 1500 Hz shows bright where 1500 Hz is, dark at 500 Hz
                         stage = "waterfall";
-                        UI.CrispHost crisp = all(w).OfType<UI.CrispHost>().First();
-                        Console.WriteLine("      waterfall " + (crisp.Crisp ? "crisp, at " + UI.CrispHost.DpiScale(crisp.Content) * 100 + " %" : "not crisp: " + crisp.NotCrispBecause) + "; " + crisp.Describe());
+                        Kainos.Modules.KainosCrispHost crisp = all(w).OfType<Kainos.Modules.KainosCrispHost>().First();
+                        Console.WriteLine("      waterfall " + (crisp.Crisp ? "crisp, at " + Kainos.Modules.KainosCrispHost.DpiScale(crisp.Content) * 100 + " %" : "not crisp: " + crisp.NotCrispBecause) + "; " + crisp.Describe());
                         UI.FreqStrip strip = (UI.FreqStrip)crisp.Content;
                         for (int i = 0; i < 60; i++)
                         {
@@ -506,9 +506,9 @@ namespace Kainos.DigiModes.SelfTest
             System.Windows.Forms.Timer feed = new System.Windows.Forms.Timer { Interval = (int)(SpectrumMaker.LineSeconds * 1000) };
             feed.Tick += (s, e) =>
             {
-                UI.CrispHost ch = all(w).OfType<UI.CrispHost>().FirstOrDefault();
+                Kainos.Modules.KainosCrispHost ch = all(w).OfType<Kainos.Modules.KainosCrispHost>().FirstOrDefault();
                 if (ch == null) return;
-                if (n == 0) w.Text += ch.Crisp ? "  (waterfall crisp, " + UI.CrispHost.DpiScale(ch.Content) * 100 + " %)" : "  (waterfall not crisp: " + ch.NotCrispBecause + ")";
+                if (n == 0) w.Text += ch.Crisp ? "  (waterfall crisp, " + Kainos.Modules.KainosCrispHost.DpiScale(ch.Content) * 100 + " %)" : "  (waterfall not crisp: " + ch.NotCrispBecause + ")";
                 float[] line = new float[SpectrumMaker.Bins];
                 for (int k = 0; k < line.Length; k++) line[k] = -60 + (float)(gauss(rnd) * 2);
                 int[] at = { 300, 520, 700, 1015, 1240, 1390, 1610, 1830, 2210, 2560 };

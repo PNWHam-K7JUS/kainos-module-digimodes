@@ -28,7 +28,7 @@ namespace Kainos.DigiModes.UI
         private readonly KButton _ft8, _ft4, _band, _rxSel, _hold, _second, _auto, _enable, _halt, _tune, _pop, _settings;
         private readonly Label _status, _clock;
         private readonly FreqStrip _strip;
-        private readonly CrispHost _stripHost;
+        private readonly KainosCrispHost _stripHost;
         private readonly DecodeList _activity, _rxList;
         private readonly Panel _qso;
         private readonly TextBox _hisCall, _hisGrid, _free;
@@ -81,7 +81,7 @@ namespace Kainos.DigiModes.UI
             Controls.Add(_clock);
 
             _strip = new FreqStrip(_t);
-            _stripHost = new CrispHost(_strip, host.GetSetting("crispwf", "1") == "1");     // the waterfall at the screen's own resolution (CrispHost.cs)
+            _stripHost = new KainosCrispHost(_strip, host.GetSetting("crispwf", "1") == "1");     // the waterfall at the screen's own resolution (Kainos.ModuleApi)
             Controls.Add(_stripHost);
             _activity = new DecodeList(_t) { Title = "BAND ACTIVITY" };
             // filters: CQ only (and calls to me), hide stations already worked on this band

@@ -324,7 +324,7 @@ namespace Kainos.DigiModes.UI
         public int Rx = 1500, Tx = 1500, BandwidthHz = 50;
         public int MaxHz = 3000;
         private List<DecodeLine> _last = new List<DecodeLine>();
-        private readonly ToolTip _tip = new ToolTip { InitialDelay = 200, ReshowDelay = 100, ShowAlways = true };     // always: in a CrispHost its window is never the active one
+        private readonly ToolTip _tip = new ToolTip { InitialDelay = 200, ReshowDelay = 100, ShowAlways = true };     // always: in a KainosCrispHost its window is never the active one
         private string _tipText = "";
         private const string Hint = "Waterfall of the audio (Hz) in your DIGU passband; along the top, the stations heard in the last period (gold = calling CQ).\r\n" +
                                     "Left-click: receive here (RX, gold line).   Right-click or Shift+click: transmit here (TX, red line).";
@@ -346,12 +346,12 @@ namespace Kainos.DigiModes.UI
 
         private float x(double hz) { return (float)(hz / MaxHz * (Width - 1)); }
 
-        // In a CrispHost the strip is at the screen's own resolution: sizes are in screen pixels, _k per design pixel
+        // In a KainosCrispHost the strip is at the screen's own resolution: sizes are in screen pixels, _k per design pixel
         private float _k = 1;
         private int S(float designPx) { return (int)Math.Round(_t.S(designPx) * _k); }
         private float F(float designPx) { return _t.S(designPx) * _k; }
-        protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); _k = CrispHost.DpiScale(this); }
-        protected override void OnSizeChanged(EventArgs e) { _k = CrispHost.DpiScale(this); base.OnSizeChanged(e); }
+        protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); _k = KainosCrispHost.DpiScale(this); }
+        protected override void OnSizeChanged(EventArgs e) { _k = KainosCrispHost.DpiScale(this); base.OnSizeChanged(e); }
 
         // the station a decode is from: the call after CQ (and any CQ modifier), else the second word
         internal static string Sender(string msg)
@@ -408,7 +408,7 @@ namespace Kainos.DigiModes.UI
             foreach (DecodeLine d in list)
                 _labels.Add(new TraceLabel { T = s0 + d.Dt, Hz = d.Freq, Text = Sender(d.Message), Cq = d.Message.StartsWith("CQ ") });
             if (_labels.Count > 400) _labels.RemoveRange(0, _labels.Count - 400);
-            Invalidate();      // all of it: a rectangle passed from Kainos's (DPI-unaware) thread would be scaled down in a CrispHost
+            Invalidate();      // all of it: a rectangle passed from Kainos's (DPI-unaware) thread would be scaled down in a KainosCrispHost
         }
 
         // the row showing time t, or -1 when it has scrolled off (or isn't in yet)
@@ -445,7 +445,7 @@ namespace Kainos.DigiModes.UI
                 _px[i] = _palette[k];
             }
             _wfDirty = true;
-            Invalidate();      // all of it: a rectangle passed from Kainos's (DPI-unaware) thread would be scaled down in a CrispHost
+            Invalidate();      // all of it: a rectangle passed from Kainos's (DPI-unaware) thread would be scaled down in a KainosCrispHost
         }
 
         public void ClearWaterfall() { if (_px != null) Array.Clear(_px, 0, _px.Length); _floor = float.NaN; _wfLines = 0; _wfDirty = true; Invalidate(); }
