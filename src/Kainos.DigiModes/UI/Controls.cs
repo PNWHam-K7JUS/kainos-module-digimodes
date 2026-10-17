@@ -1,4 +1,4 @@
-/*  Controls.cs
+﻿/*  Controls.cs
 
 Small controls drawn in the Kainos look (IKainosTheme): a push button, a list of decodes, and the audio frequency
 strip where the receive and transmit frequencies are set.
@@ -63,7 +63,8 @@ namespace Kainos.DigiModes.UI
     internal class DecodeList : Control
     {
         private readonly IKainosTheme _t;
-        private readonly List<DecodeRow> _rows = new List<DecodeRow>();
+        private readonly List<DecodeRow> _all = new List<DecodeRow>();     // every row
+        private List<DecodeRow> _rows = new List<DecodeRow>();             // the rows shown (those the filter lets through)
         private int _top;
         private bool _follow = true;
         private int _hoverRow = -1;
@@ -72,6 +73,32 @@ namespace Kainos.DigiModes.UI
         public int MaxRows = 600;
 
         public event Action<DecodeLine> RowDoubleClicked;
+
+        // ---- filtering, with toggle chips in the heading ("CQ only", "Hide worked") ----
+
+        internal class Chip { public string Text; public bool On; public Action<bool> Toggled; public RectangleF Bounds; }
+        public readonly List<Chip> Chips = new List<Chip>();
+        private Func<DecodeRow, bool> _filter;
+
+        public Func<DecodeRow, bool> Filter { get { return _filter; } set { _filter = value; rebuild(); } }
+        internal int Shown { get { return _rows.Count; } }
+
+        private bool shows(DecodeRow r) { return r.Kind == RowKind.Separator || r.Kind == RowKind.Mine || _filter == null || _filter(r); }
+
+        private void rebuild()
+        {
+            List<DecodeRow> v = new List<DecodeRow>();
+            foreach (DecodeRow r in _all)
+            {
+                if (!shows(r)) continue;
+                // a heading with nothing under it (everything filtered out) gives way to the next one
+                if (r.Kind == RowKind.Separator && v.Count > 0 && v[v.Count - 1].Kind == RowKind.Separator) v[v.Count - 1] = r;
+                else v.Add(r);
+            }
+            _rows = v;
+            if (_follow) _top = maxTop(); else _top = Math.Min(_top, maxTop());
+            Invalidate();
+        }
 
         public DecodeList(IKainosTheme t)
         {
@@ -88,20 +115,25 @@ namespace Kainos.DigiModes.UI
 
         public void Add(DecodeRow r)
         {
-            _rows.Add(r);
-            if (_rows.Count > MaxRows) { _rows.RemoveRange(0, _rows.Count - MaxRows); _top = Math.Max(0, _top - 1); }
+            _all.Add(r);
+            if (_all.Count > MaxRows) { _all.RemoveRange(0, _all.Count - MaxRows); rebuild(); return; }
+            if (shows(r))
+            {
+                if (r.Kind == RowKind.Separator && _rows.Count > 0 && _rows[_rows.Count - 1].Kind == RowKind.Separator) _rows[_rows.Count - 1] = r;
+                else _rows.Add(r);
+            }
             if (_follow) _top = maxTop();
             Invalidate();
         }
 
         public void Separator(string label)
         {
-            if (_rows.Count > 0 && _rows[_rows.Count - 1].Kind == RowKind.Separator) _rows[_rows.Count - 1].Text = label;
+            if (_all.Count > 0 && _all[_all.Count - 1].Kind == RowKind.Separator) _all[_all.Count - 1].Text = label;
             else Add(new DecodeRow { Kind = RowKind.Separator, Text = label });
             Invalidate();
         }
 
-        public void ClearRows() { _rows.Clear(); _top = 0; _follow = true; Invalidate(); }
+        public void ClearRows() { _all.Clear(); _rows.Clear(); _top = 0; _follow = true; Invalidate(); }
 
         private void scrollTo(int top)
         {
@@ -132,6 +164,8 @@ namespace Kainos.DigiModes.UI
         protected override void OnMouseDown(MouseEventArgs e)
         {
             Focus();
+            foreach (Chip c in Chips)
+                if (c.Bounds.Contains(e.X, e.Y)) { c.On = !c.On; c.Toggled?.Invoke(c.On); Invalidate(); return; }
             Rectangle th = thumb();
             if (!th.IsEmpty && e.X >= Width - barRoom)
             {
@@ -208,6 +242,18 @@ namespace Kainos.DigiModes.UI
             {
                 using (Brush hb = new SolidBrush(_t.Surface)) g.FillRectangle(hb, 0, 0, w, headH);
                 g.DrawString(Title, head, dim, _t.S(6), _t.S(3));
+                // the filter chips at the heading's right
+                float cx = w - _t.S(4);
+                for (int ci = Chips.Count - 1; ci >= 0; ci--)
+                {
+                    Chip c = Chips[ci];
+                    SizeF cs = g.MeasureString(c.Text, head);
+                    c.Bounds = new RectangleF(cx - cs.Width - _t.S(8), _t.S(2), cs.Width + _t.S(8), headH - _t.S(4));
+                    using (Brush cb = new SolidBrush(c.On ? _t.Selected : _t.Raised)) g.FillRectangle(cb, c.Bounds);
+                    using (Pen cp = new Pen(c.On ? _t.Gold : _t.Line)) g.DrawRectangle(cp, c.Bounds.X, c.Bounds.Y, c.Bounds.Width, c.Bounds.Height);
+                    using (Brush ct = new SolidBrush(c.On ? _t.Gold : _t.Dim)) g.DrawString(c.Text, head, ct, c.Bounds.X + _t.S(4), c.Bounds.Y + (c.Bounds.Height - cs.Height) / 2);
+                    cx = c.Bounds.X - _t.S(4);
+                }
                 using (Pen p = new Pen(_t.Line)) g.DrawLine(p, 0, headH - 1, w, headH - 1);
                 int y = headH;
                 for (int i = _top; i < _rows.Count && y < Height; i++, y += rowH)

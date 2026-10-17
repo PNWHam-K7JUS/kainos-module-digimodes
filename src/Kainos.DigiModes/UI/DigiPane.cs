@@ -81,6 +81,9 @@ namespace Kainos.DigiModes.UI
             _strip = new FreqStrip(_t);
             Controls.Add(_strip);
             _activity = new DecodeList(_t) { Title = "BAND ACTIVITY" };
+            // filters: CQ only (and calls to me), hide stations already worked on this band
+            _activity.Chips.Add(new DecodeList.Chip { Text = "CQ only", On = host.GetSetting("fcq", "0") == "1", Toggled = on => { _host.SetSetting("fcq", on ? "1" : "0"); applyFilter(); } });
+            _activity.Chips.Add(new DecodeList.Chip { Text = "Hide worked", On = host.GetSetting("fhide", "0") == "1", Toggled = on => { _host.SetSetting("fhide", on ? "1" : "0"); applyFilter(); } });
             _rxList = new DecodeList(_t) { Title = "RX FREQUENCY" };
             Controls.Add(_activity);
             Controls.Add(_rxList);
@@ -137,7 +140,7 @@ namespace Kainos.DigiModes.UI
             int right = Width - pad;
             _settings.SetBounds(right - _t.S(64), y, _t.S(64), bh); right -= _t.S(64) + pad;
             _pop.SetBounds(right - _t.S(64), y, _t.S(64), bh); right -= _t.S(64) + pad;
-            _clock.SetBounds(right - _t.S(140), y, _t.S(140), bh); right -= _t.S(140) + pad;
+            _clock.SetBounds(right - _t.S(200), y, _t.S(200), bh); right -= _t.S(200) + pad;
             _status.SetBounds(x + pad, y, Math.Max(0, right - x - pad), bh);
 
             y += bh + pad;
@@ -222,6 +225,7 @@ namespace Kainos.DigiModes.UI
             _e.TxStarted += (slot, msg) => _host.BeginInvoke(() =>
             {
                 string line = slot.ToString("HHmmss") + "  Tx " + _e.TxFreq.ToString().PadLeft(4) + "  " + msg;
+                allTxt(new[] { DigiPane.line(slot, _host.Radio.VfoHz(_host.Radio.TxReceiver), "Tx", _e.Mode, 0, 0, _e.TxFreq, msg) });
                 _rxList.Add(new DecodeRow { Text = line, Kind = RowKind.Mine });
             });
             _e.Status += s => _host.BeginInvoke(() => status(s));
@@ -285,8 +289,12 @@ namespace Kainos.DigiModes.UI
             if (list.Count == 0) return;
             string my = _e.Qso.MyCall, his = _e.Qso.HisCall;
             if (!_headed) { _activity.Separator(slot.ToString("HH:mm:ss") + " " + mode); _headed = true; }
-            Bands.Band band = Bands.Of(_host.Radio.VfoHz(_e.Rx));
+            double dial = _host.Radio.VfoHz(_e.Rx);
+            Bands.Band band = Bands.Of(dial);
             string bandName = band != null ? band.Name.ToUpperInvariant() : "";
+            allTxt(list.OrderBy(x => x.Freq).Select(d => line(slot, dial, "Rx", mode, d.Snr, d.Dt, d.Freq, d.Message)));
+            clockCheck(list);
+            bool alertMe = false, alertDx = false;
             foreach (DecodeLine d in list.OrderBy(x => x.Freq))
             {
                 string[] w = d.Message.Split(' ');
@@ -296,7 +304,16 @@ namespace Kainos.DigiModes.UI
                 _activity.Add(row);
                 bool mine = k == RowKind.ToMe || (his.Length > 0 && w.Length > 1 && w[1] == his) || Math.Abs(d.Freq - _e.RxFreq) <= 10;
                 if (mine) _rxList.Add(new DecodeRow { Decode = d, Text = d.ToString(), Kind = k, Mark = row.Mark, Note = row.Note });
+                alertMe |= k == RowKind.ToMe;
+                alertDx |= k == RowKind.Cq && row.Mark == WorkedMark.NewDxcc;
             }
+            // sounds: someone calling me; a new DXCC entity calling CQ (Settings)
+            try
+            {
+                if (alertMe && _host.GetSetting("sndme", "1") == "1") System.Media.SystemSounds.Exclamation.Play();
+                else if (alertDx && _host.GetSetting("snddxcc", "0") == "1") System.Media.SystemSounds.Asterisk.Play();
+            }
+            catch { }
             refreshQso();
         }
 
@@ -333,6 +350,48 @@ namespace Kainos.DigiModes.UI
 
         public void RefreshAll() { refreshAll(); }
 
+        private void applyFilter()
+        {
+            bool cq = _host.GetSetting("fcq", "0") == "1", hide = _host.GetSetting("fhide", "0") == "1";
+            _activity.Filter = !cq && !hide ? (Func<DecodeRow, bool>)null :
+                r => (!cq || r.Kind == RowKind.Cq || r.Kind == RowKind.ToMe) && (!hide || r.Mark != WorkedMark.WorkedBand || r.Kind == RowKind.ToMe);
+        }
+
+        // ---- ALL.TXT: every decode and transmission, in WSJT-X's format (DataFolder\ALL.TXT) ----
+
+        internal static string line(DateTime slot, double dialHz, string rxTx, FtxMode mode, int snr, double dt, int freq, string msg)
+        {
+            return string.Format(CultureInfo.InvariantCulture, "{0:yyMMdd_HHmmss} {1,9:0.000} {2} {3} {4,6} {5,4:0.0} {6,4} {7}",
+                slot, dialHz / 1e6, rxTx, mode, snr, dt, freq, msg);
+        }
+
+        private void allTxt(IEnumerable<string> lines)
+        {
+            try
+            {
+                string f = System.IO.Path.Combine(_host.DataFolder, "ALL.TXT");
+                System.IO.File.AppendAllLines(f, lines);
+            }
+            catch (Exception ex) { _host.Log("ALL.TXT: " + ex.Message); }
+        }
+
+        // ---- the clock check: the median DT of the stations heard; a second or more off means the PC's clock is ----
+
+        private readonly List<double> _dts = new List<double>();
+        private double _dtMedian = double.NaN;
+
+        private void clockCheck(List<DecodeLine> list)
+        {
+            foreach (DecodeLine d in list) if (!d.Ap) _dts.Add(d.Dt);
+            if (_dts.Count > 60) _dts.RemoveRange(0, _dts.Count - 60);
+            if (_dts.Count < 6) { _dtMedian = double.NaN; return; }
+            List<double> s = _dts.OrderBy(x => x).ToList();
+            _dtMedian = s[s.Count / 2];
+            if (Math.Abs(_dtMedian) >= 0.6)
+                status("The stations' DT averages " + _dtMedian.ToString("+0.0;-0.0", CultureInfo.InvariantCulture) +
+                       " s: your PC's clock looks off. Synchronise it (Windows Settings > Time > Sync now, or Meinberg NTP).");
+        }
+
         // ---- worked before: cty.dat and the logs (Qso/Worked.cs) ----
 
         internal readonly Worked Worked = new Worked();
@@ -368,7 +427,8 @@ namespace Kainos.DigiModes.UI
             double p = FtxModes.Period(_e.Mode);
             double t = SlotRecorder.Seconds(now);
             double into = t - Math.Floor(t / p) * p;
-            _clock.Text = now.ToString("HH:mm:ss") + "  " + into.ToString("0.0", CultureInfo.InvariantCulture).PadLeft(4) + "/" + p.ToString("0.#", CultureInfo.InvariantCulture);
+            _clock.Text = now.ToString("HH:mm:ss") + "  " + into.ToString("0.0", CultureInfo.InvariantCulture).PadLeft(4) + "/" + p.ToString("0.#", CultureInfo.InvariantCulture) +
+                          (double.IsNaN(_dtMedian) ? "" : "  DT" + _dtMedian.ToString("+0.0;-0.0", CultureInfo.InvariantCulture));
             _clock.ForeColor = _e.Transmitting ? _t.Tx : _t.Gold;
             if (_statusText.Length > 0 && (now - _statusAt).TotalSeconds > 20) { _statusText = ""; _status.Text = ""; }
             if (_statusText.Length == 0)
@@ -444,6 +504,7 @@ namespace Kainos.DigiModes.UI
             _e.TxLeadMs = Math.Max(0, Math.Min(1000, gd("lead", 0)));
             _e.RxLatencyMs = Math.Max(0, Math.Min(1000, gd("rxlat", 0)));
             _e.Decoder.Depth = Math.Max(1, Math.Min(3, gi("depth", 3)));
+            applyFilter();
         }
 
         private void save()

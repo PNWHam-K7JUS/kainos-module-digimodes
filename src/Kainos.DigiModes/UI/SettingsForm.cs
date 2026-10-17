@@ -20,7 +20,7 @@ namespace Kainos.DigiModes.UI
         private readonly IKainosHost _host;
         private readonly DigiEngine _e;
         private readonly NumericUpDown _level, _lead, _rxlat, _depth, _watchdog, _port;
-        private readonly CheckBox _stop73, _logPrompt, _udpOn, _udpAccept, _psk;
+        private readonly CheckBox _stop73, _logPrompt, _udpOn, _udpAccept, _psk, _sndMe, _sndDx;
         private readonly TextBox _decoder, _power, _op, _udpHost, _udpId, _pskAntenna, _workLog;
 
         public SettingsForm(IKainosHost host, DigiEngine e)
@@ -76,6 +76,8 @@ namespace Kainos.DigiModes.UI
                 "jt9's decoding depth for the end-of-period pass. 3 finds the most, using more CPU. (The early pass, which chooses your reply, uses 2 at most.)");
             _watchdog = row("Tx watchdog (minutes)", 1, 60, e.WatchdogMinutes, 1, "Transmitting stops when you haven't touched anything for this long.");
             _stop73 = check("Stop transmitting when the QSO ends (73)", e.StopAfter73, "As WSJT-X does: after 73, transmitting is turned off.");
+            _sndMe = check("Sound when someone calls me", host.GetSetting("sndme", "1") == "1", "Windows's exclamation sound when a decode has your callsign.");
+            _sndDx = check("Sound when a new DXCC entity calls CQ", host.GetSetting("snddxcc", "0") == "1", "Windows's asterisk sound when a CQ comes from an entity you haven't worked.");
 
             Controls.Add(new Label { Text = "Decoder folder (jt9.exe and ft8code.exe)", Location = new Point(x0, y), AutoSize = true });
             y += 20;
@@ -177,6 +179,8 @@ namespace Kainos.DigiModes.UI
             _host.SetSetting("udpid", _udpId.Text.Trim());
             _host.SetSetting("udpaccept", _udpAccept.Checked ? "1" : "0");
             _host.SetSetting("worklog", _workLog.Text.Trim());
+            _host.SetSetting("sndme", _sndMe.Checked ? "1" : "0");
+            _host.SetSetting("snddxcc", _sndDx.Checked ? "1" : "0");
             _host.SetSetting("psk", _psk.Checked ? "1" : "0");
             _host.SetSetting("pskantenna", _pskAntenna.Text.Trim());
             DigiModesModule.FindDecoder(_host, _e);

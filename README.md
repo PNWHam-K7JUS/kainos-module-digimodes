@@ -11,6 +11,10 @@ A module for [Kainos](https://github.com/PNWHam-K7JUS/Kainos), the Hermes Lite 2
 - **Waterfall** of the 0 to 3000 Hz audio, with the last period's stations labelled along its top. It takes about a third of the pane, so it grows when you drag the pane taller.
 - **PSK Reporter** (off by default; Settings): every 5 minutes the stations you decode are reported to pskreporter.info, in the same format WSJT-X uses.
 - **Worked before**: each decode shows the station's country, and a tag when it's new: **NEW DXCC**, **NEW BAND** (an entity new on this band), **NEW GRID** or **GRID BAND**. Stations already worked on this band are dimmed. This uses your QSOs here plus, if you add one in Settings, your main log exported as ADIF. Countries come from cty.dat.
+- **Filters** on band activity: **CQ only** (calls to you still show) and **Hide worked**.
+- **Clock check**: the stations' median DT is shown beside the clock. If it's 0.6 s or more off, you're told to synchronise the PC's clock.
+- **ALL.TXT**: every decode and transmission is written to the log folder in WSJT-X's format.
+- **Sounds** when someone calls you, and optionally when a new DXCC entity calls CQ.
 - **Tx watchdog** and **Halt Tx**. Transmitting also stops if the radio is un-keyed elsewhere.
 
 ## Installing

@@ -32,6 +32,8 @@ namespace Kainos.DigiModes.SelfTest
         [STAThread]
         private static int Main(string[] args)
         {
+            // before any control exists (the UI tests catch exceptions on the UI thread)
+            System.Windows.Forms.Application.SetUnhandledExceptionMode(System.Windows.Forms.UnhandledExceptionMode.CatchException);
             string bin = args.Length > 0 ? args[0] : @"C:\WSJT\wsjtx\bin";
             string ft8code = Path.Combine(bin, "ft8code.exe"), jt9 = Path.Combine(bin, "jt9.exe");
             string work = Path.Combine(Path.GetTempPath(), "kainos-digimodes-selftest");
@@ -144,6 +146,29 @@ namespace Kainos.DigiModes.SelfTest
                 List<DecodeLine> p = Jt9Decoder.Parse("120015 -12  0.3 1234 ~  K7JUS K1ABC FN42           a1\n120015  -3 -0.1  456 ~  CQ W1AW FN31\n120015  -3 -0.1  456 ~  CQ W1AW FN31\n<DecodeFinished>   0   2        0\n",
                     new DateTime(2026, 10, 16, 12, 0, 15, DateTimeKind.Utc), FtxMode.FT8);
                 check(p.Count == 2 && p[0].Ap && p[0].Message == "K7JUS K1ABC FN42" && p[1].Snr == -3 && p[1].Freq == 456, "jt9 output parsed");
+            }
+
+            // 13. band activity filters, and ALL.TXT's line format
+            {
+                FakeHost th = new FakeHost(bin, Path.Combine(work, "filter"));
+                UI.DecodeList l = new UI.DecodeList(th);
+                l.Separator("12:00:00");
+                l.Add(new UI.DecodeRow { Text = "a", Kind = UI.RowKind.Cq });
+                l.Add(new UI.DecodeRow { Text = "b", Kind = UI.RowKind.Normal });
+                l.Add(new UI.DecodeRow { Text = "c", Kind = UI.RowKind.ToMe });
+                l.Add(new UI.DecodeRow { Text = "d", Kind = UI.RowKind.Cq, Mark = WorkedMark.WorkedBand });
+                l.Separator("12:00:15");
+                l.Add(new UI.DecodeRow { Text = "e", Kind = UI.RowKind.Normal });
+                int all = l.Shown;
+                l.Filter = r => r.Kind == UI.RowKind.Cq || r.Kind == UI.RowKind.ToMe;
+                int cqOnly = l.Shown;               // heading, a, c, d (the second heading has nothing under it but is the last)
+                l.Filter = r => (r.Kind == UI.RowKind.Cq || r.Kind == UI.RowKind.ToMe) && (r.Mark != WorkedMark.WorkedBand || r.Kind == UI.RowKind.ToMe);
+                int both = l.Shown;
+                l.Filter = null;
+                check(all == 7 && cqOnly == 5 && both == 4 && l.Shown == 7, "band activity filters: all " + all + ", CQ only " + cqOnly + ", and hide worked " + both);
+
+                string al = UI.DigiPane.line(new DateTime(2026, 10, 16, 12, 30, 15, DateTimeKind.Utc), 14074000, "Rx", FtxMode.FT8, -12, 0.3, 1234, "CQ K1ABC FN42");
+                check(al == "261016_123015    14.074 Rx FT8    -12  0.3 1234 CQ K1ABC FN42", "ALL.TXT line as WSJT-X writes it: [" + al + "]");
             }
 
             // 12. worked before: countries from cty.dat, and how new each sender is
@@ -339,7 +364,6 @@ namespace Kainos.DigiModes.SelfTest
             // 7. the module in a stand-in Kainos: start, open the pane, run its timers, resize, close, stop
             {
                 List<Exception> uiErrors = new List<Exception>();
-                System.Windows.Forms.Application.SetUnhandledExceptionMode(System.Windows.Forms.UnhandledExceptionMode.CatchException);
                 System.Windows.Forms.Application.ThreadException += (s, e) => uiErrors.Add(e.Exception);
                 string stage = "start";
                 try
