@@ -25,7 +25,7 @@ namespace Kainos.DigiModes.UI
         private readonly IKainosTheme _t;
         private readonly DigiEngine _e;
 
-        private readonly KButton _ft8, _ft4, _band, _rxSel, _hold, _second, _auto, _enable, _halt, _pop, _settings;
+        private readonly KButton _ft8, _ft4, _band, _rxSel, _hold, _second, _auto, _enable, _halt, _tune, _pop, _settings;
         private readonly Label _status, _clock;
         private readonly FreqStrip _strip;
         private readonly DecodeList _activity, _rxList;
@@ -69,6 +69,7 @@ namespace Kainos.DigiModes.UI
             _auto = btn("Auto seq", "Send the next message of the QSO automatically");
             _enable = btn("Enable Tx", "Transmit the next message in your periods");
             _halt = btn("Halt Tx", "Stop transmitting now");
+            _tune = btn("Tune", "A steady tone at your TX frequency (up to 30 s) to set drive and Settings > Transmit audio level: aim for full power with the ALC barely moving. Click again to stop.");
             _pop = btn("Pop out", "Docked under the panadapter, or in its own window");
             _settings = btn("Settings", "Transmit level and timing, decoding, logging, and other programs (WSJT-X UDP)");
             _hold.Toggle = _auto.Toggle = true;
@@ -136,7 +137,7 @@ namespace Kainos.DigiModes.UI
             place(_ft8, 44); place(_ft4, 44); x += pad;
             place(_band, 64); place(_rxSel, 44); x += pad;
             place(_hold, 64); place(_second, 56); place(_auto, 68); x += pad;
-            place(_enable, 76); place(_halt, 64);
+            place(_enable, 76); place(_halt, 64); place(_tune, 52);
             int right = Width - pad;
             _settings.SetBounds(right - _t.S(64), y, _t.S(64), bh); right -= _t.S(64) + pad;
             _pop.SetBounds(right - _t.S(64), y, _t.S(64), bh); right -= _t.S(64) + pad;
@@ -199,7 +200,8 @@ namespace Kainos.DigiModes.UI
                 _e.TxEnabled = !_e.TxEnabled;
                 refreshAll();
             };
-            _halt.Click += (s, e) => { _e.Halt(); refreshAll(); };
+            _halt.Click += (s, e) => { _e.Halt(); _e.Tune(false); refreshAll(); };
+            _tune.Click += (s, e) => { _e.Activity(); _e.Tune(!_e.Tuning); refreshAll(); };
             _pop.Click += (s, e) => PopToggled?.Invoke();
             _settings.Click += (s, e) => showSettings();
 
@@ -221,7 +223,7 @@ namespace Kainos.DigiModes.UI
             _clear.Click += (s, e) => { _e.Activity(); lock (_e.Qso) _e.Qso.Clear(); refreshAll(); };
 
             _e.Decoded += (slot, mode, list) => _host.BeginInvoke(() => showDecodes(slot, mode, list));
-            _e.SpectrumLine += line => _host.BeginInvoke(() => _strip.AddLine(line));
+            _e.SpectrumLine += (line, t) => _host.BeginInvoke(() => _strip.AddLine(line, t));
             _e.TxStarted += (slot, msg) => _host.BeginInvoke(() =>
             {
                 string line = slot.ToString("HHmmss") + "  Tx " + _e.TxFreq.ToString().PadLeft(4) + "  " + msg;
@@ -286,6 +288,7 @@ namespace Kainos.DigiModes.UI
             if (slot != _shownSlot) { _shownSlot = slot; _slotDecodes.Clear(); _headed = false; }
             _slotDecodes.AddRange(list);
             _strip.SetDecodes(new List<DecodeLine>(_slotDecodes));
+            _strip.AddLabels(slot, mode, list);
             if (list.Count == 0) return;
             string my = _e.Qso.MyCall, his = _e.Qso.HisCall;
             if (!_headed) { _activity.Separator(slot.ToString("HH:mm:ss") + " " + mode); _headed = true; }
@@ -455,7 +458,8 @@ namespace Kainos.DigiModes.UI
             _second.Text = _e.TxSecond ? "Tx 2nd" : "Tx 1st";
             _auto.On = _e.Qso.AutoSeq;
             _enable.On = _e.TxEnabled;
-            _halt.On = _e.Transmitting;
+            _halt.On = _e.Transmitting && !_e.Tuning;
+            _tune.On = _e.Tuning;
             Bands.Band b = Bands.Of(_host.Radio.VfoHz(_e.Rx));
             _band.Text = b != null ? b.Name : "Band";
             _strip.Rx = _e.RxFreq;

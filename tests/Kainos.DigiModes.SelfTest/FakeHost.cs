@@ -1,4 +1,4 @@
-/*  FakeHost.cs (self-test)
+﻿/*  FakeHost.cs (self-test)
 
 A stand-in for Kainos, so the self-test can start the module, build its pane in a window and drive it.
 
@@ -68,11 +68,15 @@ namespace Kainos.DigiModes.SelfTest
         public int RxRate { get { return 48000; } }
         public int ReadRx(float[] dst, int max) { return Air != null && Clock != null ? Air.Read(dst, max, Clock()) : 0; }
         public int TxRate { get { return 48000; } }
-        public void TxStart() { }
-        public int TxWrite(float[] src, int n) { return n; }
-        public int TxQueued { get { return 0; } }
-        public void TxClear() { }
-        public void TxStop() { }
+        // transmit audio drains at the real rate, as the radio takes it
+        private long _txWritten;
+        private System.Diagnostics.Stopwatch _txClock;
+        public long TxSamples;
+        public void TxStart() { _txWritten = 0; _txClock = System.Diagnostics.Stopwatch.StartNew(); }
+        public int TxWrite(float[] src, int n) { _txWritten += n; TxSamples += n; return n; }
+        public int TxQueued { get { return _txClock == null ? 0 : (int)Math.Max(0, _txWritten - _txClock.Elapsed.TotalSeconds * TxRate); } }
+        public void TxClear() { if (_txClock != null) _txWritten = (long)(_txClock.Elapsed.TotalSeconds * TxRate); }
+        public void TxStop() { _txClock = null; }
 
         public Color Bg { get { return Color.FromArgb(0x05, 0x0b, 0x13); } }
         public Color Surface { get { return Color.FromArgb(0x0a, 0x15, 0x20); } }

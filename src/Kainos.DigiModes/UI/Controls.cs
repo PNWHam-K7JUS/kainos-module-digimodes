@@ -387,11 +387,42 @@ namespace Kainos.DigiModes.UI
         private int scaleH { get { return _t.S(11); } }
         private Rectangle wfRect { get { return new Rectangle(0, labelH, Width, Math.Max(0, Height - labelH - scaleH)); } }
 
-        // a spectrum line (dB, 0 - 3000 Hz), on the UI thread
-        public void AddLine(float[] db)
+        // ---- callsigns on their traces: each decode labelled where (frequency) and when (row) it was heard ----
+
+        private class TraceLabel { public double T; public int Hz; public string Text; public bool Cq; }
+        private readonly List<TraceLabel> _labels = new List<TraceLabel>();
+        private readonly double[] _rowT = new double[WfRows];      // the UTC time (s) of each row, newest first
+
+        // a period's decodes: each label at the middle of its signal (the period's start + 0.5 s + half the signal, + DT)
+        public void AddLabels(DateTime slotUtc, Ftx.FtxMode mode, IEnumerable<DecodeLine> list)
+        {
+            double half = (mode == Ftx.FtxMode.FT8 ? 79 * 0.160 : 105 * 0.048) / 2;
+            double s0 = Decode.SlotRecorder.Seconds(slotUtc) + Ftx.FtxModes.TxStart(mode) + half;
+            foreach (DecodeLine d in list)
+                _labels.Add(new TraceLabel { T = s0 + d.Dt, Hz = d.Freq, Text = Sender(d.Message), Cq = d.Message.StartsWith("CQ ") });
+            if (_labels.Count > 400) _labels.RemoveRange(0, _labels.Count - 400);
+            Invalidate(wfRect);
+        }
+
+        // the row showing time t, or -1 when it has scrolled off (or isn't in yet)
+        private int rowOf(double t, int rows)
+        {
+            if (_wfLines == 0 || rows <= 0) return -1;
+            int have = Math.Min(Math.Min(_wfLines, WfRows), rows);
+            if (t > _rowT[0] + 0.2 || t < _rowT[have - 1] - 0.2) return -1;
+            int best = 0;
+            double bd = double.MaxValue;
+            for (int r = 0; r < have; r++) { double dd = Math.Abs(_rowT[r] - t); if (dd < bd) { bd = dd; best = r; } }
+            return best;
+        }
+
+        // a spectrum line (dB, 0 - 3000 Hz) and the UTC time of its middle (s), on the UI thread
+        public void AddLine(float[] db, double t)
         {
             if (db == null || db.Length < _wfCols) return;
             if (_px == null) _px = new int[_wfCols * WfRows];
+            Array.Copy(_rowT, 0, _rowT, 1, WfRows - 1);
+            _rowT[0] = t;
             if (_palette == null) _palette = makePalette(_t);
             // the noise floor: a low percentile of the line, followed slowly (quickly for the first lines)
             float[] sorted = (float[])db.Clone();
@@ -445,12 +476,33 @@ namespace Kainos.DigiModes.UI
                 _wf.UnlockBits(bd);
                 _wfDirty = false;
             }
-            g.InterpolationMode = InterpolationMode.NearestNeighbor;
-            g.PixelOffsetMode = PixelOffsetMode.Half;
-            // one row a pixel; across, stretched to the width
+            // one row a pixel; across, the 1024 bins scaled smoothly to the width (no blocks), edges not faded
             int rows = Math.Min(WfRows, r.Height);
-            g.DrawImage(_wf, new Rectangle(r.X, r.Y, r.Width, rows), new Rectangle(0, 0, _wfCols, rows), GraphicsUnit.Pixel);
+            g.InterpolationMode = InterpolationMode.HighQualityBilinear;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            using (System.Drawing.Imaging.ImageAttributes ia = new System.Drawing.Imaging.ImageAttributes())
+            {
+                ia.SetWrapMode(WrapMode.TileFlipXY);
+                g.DrawImage(_wf, new Rectangle(r.X, r.Y, r.Width, rows), 0, 0, _wfCols, rows, GraphicsUnit.Pixel, ia);
+            }
             g.PixelOffsetMode = PixelOffsetMode.Default;
+            g.InterpolationMode = InterpolationMode.Default;
+
+            // the callsigns on their traces: a small tag at the signal's left edge, at the row of its middle
+            using (Font lf = _t.Font(_t.S(9.5f), true))
+            {
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+                foreach (TraceLabel l in _labels)
+                {
+                    int row = rowOf(l.T, rows);
+                    if (row < 0) continue;
+                    SizeF sz = g.MeasureString(l.Text, lf);
+                    float lx = x(l.Hz), ly = r.Y + row - sz.Height / 2;
+                    if (ly < r.Y || ly + sz.Height > r.Bottom) continue;
+                    using (Brush bg = new SolidBrush(Color.FromArgb(170, _t.Bg))) g.FillRectangle(bg, lx, ly + 1, sz.Width, sz.Height - 2);
+                    using (Brush tb = new SolidBrush(l.Cq ? _t.Gold : Color.White)) g.DrawString(l.Text, lf, tb, lx, ly);
+                }
+            }
         }
 
         protected override void OnPaint(PaintEventArgs e)

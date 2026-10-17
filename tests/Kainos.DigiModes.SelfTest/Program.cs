@@ -227,7 +227,7 @@ namespace Kainos.DigiModes.SelfTest
                 check(ok, "PSK Reporter packet: IPFIX header, templates and records read back (sets " + string.Join(",", ids.Select(i => i.ToString("x"))) + ")");
             }
 
-            // 10. the waterfall's FFT: a 1000 Hz tone peaks in its bin (1000 * 2048 / 12000 = 170.7)
+            // 10. the waterfall's FFT: a 1000 Hz tone peaks in its bin (1000 * 4096 / 12000 = 341.3)
             {
                 SpectrumMaker sm = new SpectrumMaker();
                 float[] tone = new float[SpectrumMaker.N * 2];
@@ -235,7 +235,7 @@ namespace Kainos.DigiModes.SelfTest
                 List<float[]> lines = new List<float[]>();
                 sm.Push(tone, tone.Length, lines);
                 int peak = lines.Count > 0 ? Array.IndexOf(lines[0], lines[0].Max()) : -1;
-                check(lines.Count == 2 && (peak == 170 || peak == 171), "waterfall FFT: 1000 Hz in bin " + peak);
+                check(lines.Count == 3 && (peak == 341 || peak == 342), "waterfall FFT (4096 points, half overlap): 1000 Hz in bin " + peak + ", " + lines.Count + " lines from 8192 samples");
             }
 
             // 9. WSJT-X UDP: a stand-in GridTracker on a local port gets our heartbeat, a decode and a logged QSO in
@@ -394,8 +394,8 @@ namespace Kainos.DigiModes.SelfTest
                         {
                             float[] line = new float[SpectrumMaker.Bins];
                             for (int k = 0; k < line.Length; k++) line[k] = -60 + (float)(gauss(rnd) * 2);
-                            for (int k = 254; k < 262; k++) line[k] = -20;
-                            strip.AddLine(line);
+                            for (int k = 508; k < 524; k++) line[k] = -20;
+                            strip.AddLine(line, 1000 + i * SpectrumMaker.LineSeconds);
                         }
                         pump(200);
                         using (System.Drawing.Bitmap shot = new System.Drawing.Bitmap(strip.Width, strip.Height))
@@ -405,6 +405,35 @@ namespace Kainos.DigiModes.SelfTest
                             System.Drawing.Color hot = shot.GetPixel((int)(1515.0 / 3000 * (strip.Width - 1)), yy), cold = shot.GetPixel((int)(500.0 / 3000 * (strip.Width - 1)) + 3, yy);
                             check(hot.GetBrightness() > cold.GetBrightness() + 0.3f, "waterfall shows a signal where it is (" + hot + " vs " + cold + ")");
                         }
+                        // a callsign on its trace: a decode at 500 Hz whose signal was in the middle of those lines is labelled there
+                        double lastT = 1000 + 59 * SpectrumMaker.LineSeconds, midT = lastT - 20 * SpectrumMaker.LineSeconds;
+                        double half = 79 * 0.160 / 2 + FtxModes.TxStart(FtxMode.FT8);
+                        DateTime lslot = new DateTime((long)Math.Round((midT - half) * 1e7), DateTimeKind.Utc);
+                        strip.AddLabels(lslot, FtxMode.FT8, new[] { new DecodeLine { Message = "CQ W9XYZ EN37", Freq = 500, Snr = -5, Dt = 0, Mode = FtxMode.FT8, SlotUtc = lslot } });
+                        pump(100);
+                        using (System.Drawing.Bitmap shot = new System.Drawing.Bitmap(strip.Width, strip.Height))
+                        {
+                            strip.DrawToBitmap(shot, new System.Drawing.Rectangle(0, 0, strip.Width, strip.Height));
+                            int lx = (int)(500.0 / 3000 * (strip.Width - 1)), labelTop = 15, rowY = labelTop + 20, golden = 0;
+                            for (int yy = rowY - 8; yy <= rowY + 8; yy++)
+                                for (int xx = lx; xx < Math.Min(strip.Width, lx + 50); xx++)
+                                {
+                                    System.Drawing.Color px = shot.GetPixel(xx, yy);
+                                    if (px.R > 150 && px.G > 120 && px.B < 140 && px.R > px.B + 50) golden++;      // the gold CQ label's text
+                                }
+                            check(golden > 5, "callsign drawn on its trace in the waterfall (" + golden + " gold pixels at row 20, 500 Hz)");
+                        }
+
+                        // Tune: keys the radio and sends the tone; off un-keys it
+                        stage = "tune";
+                        DigiEngine teng = new DigiEngine(host) { TxFreq = 1500 };
+                        teng.Tune(true);
+                        for (int i = 0; i < 20; i++) { teng.Step(); pump(10); }      // pump: MOX is set through the window (BeginInvoke)
+                        bool keyed = teng.Tuning && teng.Transmitting && host.Mox && host.TxSamples > 0;
+                        teng.Tune(false);
+                        for (int i = 0; i < 5; i++) { teng.Step(); pump(10); }
+                        pump(100);
+                        check(keyed && !teng.Tuning && !teng.Transmitting && !host.Mox, "Tune keys the radio with a tone, and stops (" + host.TxSamples + " samples)");
                         foreach (int width in new[] { 1080, 1400 })
                         {
                             w.ClientSize = new System.Drawing.Size(width, 236);

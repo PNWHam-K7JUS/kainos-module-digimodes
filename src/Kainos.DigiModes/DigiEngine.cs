@@ -157,7 +157,8 @@ namespace Kainos.DigiModes
 
         // ---- the waterfall: a spectrum line about 6 times a second (only while someone listens) ----
 
-        public event Action<float[]> SpectrumLine;
+        // a line (dB, 0 - 3000 Hz) and the UTC time (seconds) of the audio at its middle
+        public event Action<float[], double> SpectrumLine;
         private readonly SpectrumMaker _spec = new SpectrumMaker();
         private readonly float[] _specBuf = new float[12000];
         private readonly List<float[]> _specLines = new List<float[]>();
@@ -171,7 +172,15 @@ namespace Kainos.DigiModes
             while ((n = _rec.Since(ref _specPos, _specBuf)) > 0) _spec.Push(_specBuf, n, _specLines);
             if (_specLines.Count == 0) return;
             // while transmitting the receiver hears nothing useful: the waterfall pauses
-            if (!Transmitting) foreach (float[] l in _specLines) SpectrumLine?.Invoke(l);
+            // each line's time: the last ended SamplesSinceLine samples before the newest, the ones before it a hop apart
+            double newest = _rec.NewestTime, sr = SpectrumMaker.Rate;
+            int k = _specLines.Count;
+            if (!Transmitting && !double.IsNaN(newest))
+                for (int i = 0; i < k; i++)
+                {
+                    double end = newest - (_spec.SamplesSinceLine + (k - 1 - i) * (double)SpectrumMaker.Hop) / sr;
+                    SpectrumLine?.Invoke(_specLines[i], end - SpectrumMaker.N / 2.0 / sr);
+                }
             _specLines.Clear();
         }
 
@@ -269,11 +278,47 @@ namespace Kainos.DigiModes
         private DateTime _moxAskedAt;
         private bool _moxSeen;
 
+        // ---- Tune: a steady tone at the TX frequency, at the transmit level, for setting drive and audio level (as
+        // WSJT-X's Tune); up to 30 s, or until turned off ----
+
+        private volatile bool _tuneReq;
+        public bool Tuning { get; private set; }
+        public void Tune(bool on) { _tuneReq = on; if (!on && Tuning) _halt = true; }
+
+        private bool startTune(DateTime now)
+        {
+            if (!_host.Radio.PowerOn) { Status?.Invoke("The radio is off"); _tuneReq = false; return false; }
+            int rate = _host.Audio.TxRate;
+            if (rate <= 0) { Status?.Invoke("No transmit audio stream"); _tuneReq = false; return false; }
+            float amp = (float)Math.Pow(10, LevelDb / 20.0);
+            int n = rate * 30, ramp = rate / 100;
+            float[] w = new float[n];
+            double step = 2 * Math.PI * TxFreq / rate;
+            for (int i = 0; i < n; i++)
+            {
+                double env = i < ramp ? i / (double)ramp : i > n - ramp ? (n - i) / (double)ramp : 1;
+                w[i] = (float)(Math.Sin(step * i) * amp * env);
+            }
+            _txWave = w;
+            _txPos = 0;
+            Tuning = true;
+            Transmitting = true;
+            _halt = false;
+            _moxSeen = false;
+            _moxAskedAt = now;
+            _host.Audio.TxStart();
+            _host.BeginInvoke(() => _host.Radio.SetMox(true));
+            _host.Log("Tune " + TxFreq + " Hz at " + LevelDb + " dB");
+            Changed?.Invoke();
+            return true;
+        }
+
         private void txTick()
         {
             DateTime now = Now();
             if (Transmitting) { feedTx(now); return; }
             _halt = false;
+            if (_tuneReq) { startTune(now); return; }
             if (!TxEnabled) return;
 
             if ((now - _lastActivity).TotalMinutes > WatchdogMinutes)
@@ -372,6 +417,8 @@ namespace Kainos.DigiModes
         {
             if (!Transmitting) return;
             Transmitting = false;
+            Tuning = false;
+            _tuneReq = false;
             _host.Audio.TxStop();
             _host.BeginInvoke(() => _host.Radio.SetMox(false));
             _txWave = null;
