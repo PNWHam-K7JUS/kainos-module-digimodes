@@ -324,7 +324,7 @@ namespace Kainos.DigiModes.UI
         public int Rx = 1500, Tx = 1500, BandwidthHz = 50;
         public int MaxHz = 3000;
         private List<DecodeLine> _last = new List<DecodeLine>();
-        private readonly ToolTip _tip = new ToolTip { InitialDelay = 200, ReshowDelay = 100 };
+        private readonly ToolTip _tip = new ToolTip { InitialDelay = 200, ReshowDelay = 100, ShowAlways = true };     // always: in a CrispHost its window is never the active one
         private string _tipText = "";
         private const string Hint = "Waterfall of the audio (Hz) in your DIGU passband; along the top, the stations heard in the last period (gold = calling CQ).\r\n" +
                                     "Left-click: receive here (RX, gold line).   Right-click or Shift+click: transmit here (TX, red line).";
@@ -345,6 +345,13 @@ namespace Kainos.DigiModes.UI
         public void SetDecodes(List<DecodeLine> d) { _last = d ?? new List<DecodeLine>(); Invalidate(); }
 
         private float x(double hz) { return (float)(hz / MaxHz * (Width - 1)); }
+
+        // In a CrispHost the strip is at the screen's own resolution: sizes are in screen pixels, _k per design pixel
+        private float _k = 1;
+        private int S(float designPx) { return (int)Math.Round(_t.S(designPx) * _k); }
+        private float F(float designPx) { return _t.S(designPx) * _k; }
+        protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); _k = CrispHost.DpiScale(this); }
+        protected override void OnSizeChanged(EventArgs e) { _k = CrispHost.DpiScale(this); base.OnSizeChanged(e); }
 
         // the station a decode is from: the call after CQ (and any CQ modifier), else the second word
         internal static string Sender(string msg)
@@ -373,7 +380,7 @@ namespace Kainos.DigiModes.UI
 
         // ---- the waterfall: newest line at the top, 0 - 3000 Hz across, scrolled a row a line ----
 
-        private const int WfRows = 400;
+        private const int WfRows = 1200;     // a row a screen pixel: enough for a tall pane at 150 %
         private readonly int _wfCols = SpectrumMaker.Bins;
         private int[] _px;
         private Bitmap _wf;
@@ -383,8 +390,8 @@ namespace Kainos.DigiModes.UI
         public float RangeDb = 30;          // the colours span this much above the noise floor
         private static int[] _palette;
 
-        private int labelH { get { return _t.S(15); } }
-        private int scaleH { get { return _t.S(11); } }
+        private int labelH { get { return S(15); } }
+        private int scaleH { get { return S(11); } }
         private Rectangle wfRect { get { return new Rectangle(0, labelH, Width, Math.Max(0, Height - labelH - scaleH)); } }
 
         // ---- callsigns on their traces: each decode labelled where (frequency) and when (row) it was heard ----
@@ -401,7 +408,7 @@ namespace Kainos.DigiModes.UI
             foreach (DecodeLine d in list)
                 _labels.Add(new TraceLabel { T = s0 + d.Dt, Hz = d.Freq, Text = Sender(d.Message), Cq = d.Message.StartsWith("CQ ") });
             if (_labels.Count > 400) _labels.RemoveRange(0, _labels.Count - 400);
-            Invalidate(wfRect);
+            Invalidate();      // all of it: a rectangle passed from Kainos's (DPI-unaware) thread would be scaled down in a CrispHost
         }
 
         // the row showing time t, or -1 when it has scrolled off (or isn't in yet)
@@ -438,7 +445,7 @@ namespace Kainos.DigiModes.UI
                 _px[i] = _palette[k];
             }
             _wfDirty = true;
-            Invalidate(wfRect);
+            Invalidate();      // all of it: a rectangle passed from Kainos's (DPI-unaware) thread would be scaled down in a CrispHost
         }
 
         public void ClearWaterfall() { if (_px != null) Array.Clear(_px, 0, _px.Length); _floor = float.NaN; _wfLines = 0; _wfDirty = true; Invalidate(); }
@@ -478,9 +485,10 @@ namespace Kainos.DigiModes.UI
                 _wfDirty = false;
             }
             // one row a pixel; across, the 1024 bins scaled smoothly to the width (no blocks), edges not faded
-            int rows = Math.Min(WfRows, r.Height);
+            int rows = Math.Min(Math.Min(WfRows, _wfLines), r.Height);     // only the rows that have arrived (the rest stays navy)
             g.InterpolationMode = InterpolationMode.HighQualityBilinear;
             g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            if (rows > 0)
             using (System.Drawing.Imaging.ImageAttributes ia = new System.Drawing.Imaging.ImageAttributes())
             {
                 ia.SetWrapMode(WrapMode.TileFlipXY);
@@ -490,7 +498,7 @@ namespace Kainos.DigiModes.UI
             g.InterpolationMode = InterpolationMode.Default;
 
             // the callsigns on their traces: a small tag at the signal's left edge, at the row of its middle
-            using (Font lf = _t.Font(_t.S(9.5f), true))
+            using (Font lf = _t.Font(F(9.5f), true))
             {
                 g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
                 foreach (TraceLabel l in _labels)
@@ -500,7 +508,7 @@ namespace Kainos.DigiModes.UI
                     SizeF sz = g.MeasureString(l.Text, lf);
                     float lx = x(l.Hz), ly = r.Y + row - sz.Height / 2;
                     if (ly < r.Y || ly + sz.Height > r.Bottom) continue;
-                    using (Brush bg = new SolidBrush(Color.FromArgb(170, _t.Bg))) g.FillRectangle(bg, lx, ly + 1, sz.Width, sz.Height - 2);
+                    using (Brush bg = new SolidBrush(Color.FromArgb(170, _t.Bg))) g.FillRectangle(bg, lx, ly + _k, sz.Width, sz.Height - 2 * _k);
                     using (Brush tb = new SolidBrush(l.Cq ? _t.Gold : Color.White)) g.DrawString(l.Text, lf, tb, lx, ly);
                 }
             }
@@ -513,36 +521,36 @@ namespace Kainos.DigiModes.UI
             drawWaterfall(g);
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
             int h = Height;
-            using (Font f = _t.Font(_t.S(9.5f), false))
-            using (Font call = _t.Font(_t.S(9.5f), true))
+            using (Font f = _t.Font(F(9.5f), false))
+            using (Font call = _t.Font(F(9.5f), true))
             using (Brush fb = new SolidBrush(_t.Faint))
             using (Pen grid = new Pen(_t.Line))
             {
                 // the scale along the bottom
-                g.DrawString("AUDIO Hz", f, fb, 2, h - scaleH - 1);
+                g.DrawString("AUDIO Hz", f, fb, 2 * _k, h - scaleH - _k);
                 for (int hz = 500; hz < MaxHz; hz += 500)
                 {
                     float xx = x(hz);
-                    g.DrawLine(grid, xx, h - _t.S(4), xx, h);
-                    g.DrawString(hz.ToString(), f, fb, xx + 2, h - scaleH - 1);
+                    g.DrawLine(grid, xx, h - S(4), xx, h);
+                    g.DrawString(hz.ToString(), f, fb, xx + 2 * _k, h - scaleH - _k);
                 }
                 // the stations of the last period along the top, with their callsigns where there's room
-                float bw = Math.Max(2, x(BandwidthHz));
+                float bw = Math.Max(2 * _k, x(BandwidthHz));
                 foreach (DecodeLine d in _last.OrderBy(l => l.Freq))
                 {
                     bool cq = d.Message.StartsWith("CQ ");
                     Color c = cq ? _t.Gold : _t.Ice;
                     float bx = x(d.Freq);
-                    using (Brush b = new SolidBrush(Color.FromArgb(150, c))) g.FillRectangle(b, bx, 1, bw, labelH - 2);
+                    using (Brush b = new SolidBrush(Color.FromArgb(150, c))) g.FillRectangle(b, bx, _k, bw, labelH - 2 * _k);
                     string who = Sender(d.Message);
                     SizeF sz = g.MeasureString(who, call);
-                    if (sz.Width <= bw + _t.S(30))
-                        using (Brush tb = new SolidBrush(cq ? _t.Gold : _t.Text)) g.DrawString(who, call, tb, bx + 1, (labelH - sz.Height) / 2);
+                    if (sz.Width <= bw + S(30))
+                        using (Brush tb = new SolidBrush(cq ? _t.Gold : _t.Text)) g.DrawString(who, call, tb, bx + _k, (labelH - sz.Height) / 2);
                 }
                 // RX and TX, tagged at the top
                 using (Brush rb = new SolidBrush(Color.FromArgb(60, _t.Gold))) g.FillRectangle(rb, x(Rx), 0, bw, h);
-                using (Pen rp = new Pen(_t.Gold, 2)) g.DrawLine(rp, x(Rx), 0, x(Rx), h);
-                using (Pen tp = new Pen(_t.Tx, 2) { DashStyle = DashStyle.Dash }) g.DrawLine(tp, x(Tx), 0, x(Tx), h);
+                using (Pen rp = new Pen(_t.Gold, 2 * _k)) g.DrawLine(rp, x(Rx), 0, x(Rx), h);
+                using (Pen tp = new Pen(_t.Tx, 2 * _k) { DashStyle = DashStyle.Dash }) g.DrawLine(tp, x(Tx), 0, x(Tx), h);
                 tag(g, call, "RX", x(Rx), _t.Gold, Rx <= Tx);
                 tag(g, call, "TX", x(Tx), _t.Tx, Tx < Rx);
             }
@@ -552,11 +560,11 @@ namespace Kainos.DigiModes.UI
         private void tag(Graphics g, Font f, string text, float lx, Color c, bool left)
         {
             SizeF sz = g.MeasureString(text, f);
-            float tx = left ? lx - sz.Width - 2 : lx + 3;
-            if (tx < 0) tx = lx + 3;
-            if (tx + sz.Width > Width) tx = lx - sz.Width - 2;
-            using (Brush bg = new SolidBrush(_t.Surface)) g.FillRectangle(bg, tx, 0, sz.Width, sz.Height - 2);
-            using (Brush b = new SolidBrush(c)) g.DrawString(text, f, b, tx, -1);
+            float tx = left ? lx - sz.Width - 2 * _k : lx + 3 * _k;
+            if (tx < 0) tx = lx + 3 * _k;
+            if (tx + sz.Width > Width) tx = lx - sz.Width - 2 * _k;
+            using (Brush bg = new SolidBrush(_t.Surface)) g.FillRectangle(bg, tx, 0, sz.Width, sz.Height - 2 * _k);
+            using (Brush b = new SolidBrush(c)) g.DrawString(text, f, b, tx, -_k);
         }
     }
 }

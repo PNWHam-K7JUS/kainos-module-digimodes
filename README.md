@@ -8,7 +8,7 @@ A module for [Kainos](https://github.com/PNWHam-K7JUS/Kainos), the Hermes Lite 2
 - **Band menu**: tunes to the band's FT8 or FT4 frequency and sets DIGU.
 - **Log QSO**: when a QSO completes, a window opens with its details filled in. You can check or add to them before logging, or turn the window off to log straight away. Each QSO is added to `kainos-digimodes.adi` (Settings, "Open the log folder").
 - **Works with GridTracker, JTAlert, N1MM+, Log4OM, HRD, DXKeeper and others.** The module sends WSJT-X's UDP messages to 127.0.0.1:2237 by default: decodes, status, and logged QSOs (as a QSO message and as ADIF). It also takes their requests: double-click a station in GridTracker to answer it, halt TX, send free text, or replay recent decodes. Set those programs up as you would for WSJT-X.
-- **Waterfall** of the 0 to 3000 Hz audio, with the last period's stations labelled along its top. It takes about a third of the pane, so it grows when you drag the pane taller.
+- **Waterfall** of the 0 to 3000 Hz audio, with the last period's stations labelled along its top. It takes about a third of the pane, so it grows when you drag the pane taller. At 125 % or 150 % display scaling it is drawn at the screen's own resolution, not enlarged and blurred by Windows as the rest of Kainos is (Settings, "Sharp waterfall", to turn this off).
 - **PSK Reporter** (off by default; Settings): every 5 minutes the stations you decode are reported to pskreporter.info, in the same format WSJT-X uses.
 - **Worked before**: each decode shows the station's country, and a tag when it's new: **NEW DXCC**, **NEW BAND** (an entity new on this band), **NEW GRID** or **GRID BAND**. Stations already worked on this band are dimmed. This uses your QSOs here plus, if you add one in Settings, your main log exported as ADIF. Countries come from cty.dat.
 - **Filters** on band activity: **CQ only** (calls to you still show) and **Hide worked**.
@@ -42,6 +42,7 @@ To test a build before it's released, use **Install from file...** with the zip 
 | `Qso/QsoEngine.cs` | Generates the six messages and runs the auto-sequencing. Logging is in `AdifLog.cs`. |
 | `DigiEngine.cs` | The period clock and decode schedule, plus timed transmit through Kainos's transmit audio feed. |
 | `UI/` | The pane, drawn in the Kainos colours. |
+| `UI/CrispHost.cs` | Kainos isn't DPI-aware, so Windows enlarges it as a picture at 125 % / 150 %. Windows won't let a per-monitor-aware child window into a DPI-unaware one (even with `SetThreadDpiHostingBehavior` mixed), so the waterfall goes in a borderless per-monitor-aware window of its own, owned by the pane's form and kept over a placeholder in the pane (clipped to what the pane shows, hidden with it). The waterfall then works in screen pixels and scales its sizes by `CrispHost.DpiScale`. |
 
 ## Building
 
@@ -56,6 +57,8 @@ The script builds the module, then runs `tests\Kainos.DigiModes.SelfTest`. The s
 - the encoder against `ft8code`;
 - that FT8 and FT4 survive the full path to `jt9` (tones, GFSK at 48 kHz, noise, the 12 kHz resampler) and decode at the right frequency with DT 0.0;
 - the slot recorder's timing, the sequencer, and the output parser.
+
+`Kainos.DigiModes.SelfTest.exe <WSJT-X bin> --show` opens the pane in a stand-in Kainos with a made-up waterfall, to look at; add `--blurry` for the waterfall as Windows stretches it.
 
 It then writes `dist\kainos-digimodes-<version>.zip` and `dist\registry-entry.json`. To publish a version:
 

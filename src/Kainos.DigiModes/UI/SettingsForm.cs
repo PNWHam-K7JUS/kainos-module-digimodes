@@ -1,4 +1,4 @@
-/*  SettingsForm.cs
+﻿/*  SettingsForm.cs
 
 The FT8 / FT4 settings: transmit level and timing, decoding, the decoder's folder; logging; and WSJT-X's UDP
 messages for other programs.
@@ -20,7 +20,7 @@ namespace Kainos.DigiModes.UI
         private readonly IKainosHost _host;
         private readonly DigiEngine _e;
         private readonly NumericUpDown _level, _lead, _rxlat, _depth, _watchdog, _port;
-        private readonly CheckBox _stop73, _logPrompt, _udpOn, _udpAccept, _psk, _sndMe, _sndDx;
+        private readonly CheckBox _stop73, _logPrompt, _udpOn, _udpAccept, _psk, _sndMe, _sndDx, _crisp;
         private readonly TextBox _decoder, _power, _op, _udpHost, _udpId, _pskAntenna, _workLog;
 
         public SettingsForm(IKainosHost host, DigiEngine e)
@@ -78,6 +78,9 @@ namespace Kainos.DigiModes.UI
             _stop73 = check("Stop transmitting when the QSO ends (73)", e.StopAfter73, "As WSJT-X does: after 73, transmitting is turned off.");
             _sndMe = check("Sound when someone calls me", host.GetSetting("sndme", "1") == "1", "Windows's exclamation sound when a decode has your callsign.");
             _sndDx = check("Sound when a new DXCC entity calls CQ", host.GetSetting("snddxcc", "0") == "1", "Windows's asterisk sound when a CQ comes from an entity you haven't worked.");
+            _crisp = check("Sharp waterfall at 125 % / 150 % display scaling", host.GetSetting("crispwf", "1") == "1",
+                "Draws the waterfall at the screen's own resolution (in a window of its own, laid over the pane), where Windows would\r\n" +
+                "otherwise enlarge it and blur it. From the module's next start (Setup > Modules, or the next run of Kainos).");
 
             Controls.Add(new Label { Text = "Decoder folder (jt9.exe and ft8code.exe)", Location = new Point(x0, y), AutoSize = true });
             y += 20;
@@ -181,6 +184,7 @@ namespace Kainos.DigiModes.UI
             _host.SetSetting("worklog", _workLog.Text.Trim());
             _host.SetSetting("sndme", _sndMe.Checked ? "1" : "0");
             _host.SetSetting("snddxcc", _sndDx.Checked ? "1" : "0");
+            _host.SetSetting("crispwf", _crisp.Checked ? "1" : "0");
             _host.SetSetting("psk", _psk.Checked ? "1" : "0");
             _host.SetSetting("pskantenna", _pskAntenna.Text.Trim());
             DigiModesModule.FindDecoder(_host, _e);

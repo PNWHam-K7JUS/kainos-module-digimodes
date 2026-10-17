@@ -4,6 +4,8 @@ Checks the module without a radio: the encoder against WSJT-X's ft8code, and the
 48 kHz -> noise -> 12 kHz resampler -> jt9) decoding what was sent, for FT8 and FT4; the QSO sequencer; parsing.
 
   Kainos.DigiModes.SelfTest.exe <folder with jt9.exe and ft8code.exe>
+  Kainos.DigiModes.SelfTest.exe <folder> --show      the pane in a stand-in Kainos with a made-up waterfall, to look at
+                                         [--blurry]  ... with the waterfall as Windows stretches it (Sharp waterfall off)
 
 This file is part of the Kainos Digital Modes module. Copyright (C) 2026 Justin Cron K7JUS. GPLv3 or later.
 */
@@ -38,6 +40,7 @@ namespace Kainos.DigiModes.SelfTest
             string ft8code = Path.Combine(bin, "ft8code.exe"), jt9 = Path.Combine(bin, "jt9.exe");
             string work = Path.Combine(Path.GetTempPath(), "kainos-digimodes-selftest");
             Directory.CreateDirectory(work);
+            if (args.Contains("--show")) return show(bin, work);
 
             // 1. the encoder gives ft8code's own FT8 tones
             string[] msgs = { "CQ K7JUS CN87", "K1ABC K7JUS CN87", "K7JUS K1ABC -12", "K1ABC K7JUS R-07", "K7JUS K1ABC RR73",
@@ -407,7 +410,9 @@ namespace Kainos.DigiModes.SelfTest
                             for (int i = 0; i < 80; i++) l.Add(new UI.DecodeRow { Text = "120015 -12  0.3 1234  CQ K1ABC FN42", Kind = i % 5 == 0 ? UI.RowKind.Cq : UI.RowKind.Normal });
                         // the waterfall: a signal at 1500 Hz shows bright where 1500 Hz is, dark at 500 Hz
                         stage = "waterfall";
-                        UI.FreqStrip strip = all(w).OfType<UI.FreqStrip>().First();
+                        UI.CrispHost crisp = all(w).OfType<UI.CrispHost>().First();
+                        Console.WriteLine("      waterfall " + (crisp.Crisp ? "crisp, at " + UI.CrispHost.DpiScale(crisp.Content) * 100 + " %" : "not crisp: " + crisp.NotCrispBecause) + "; " + crisp.Describe());
+                        UI.FreqStrip strip = (UI.FreqStrip)crisp.Content;
                         for (int i = 0; i < 60; i++)
                         {
                             float[] line = new float[SpectrumMaker.Bins];
@@ -484,6 +489,41 @@ namespace Kainos.DigiModes.SelfTest
                 yield return c;
                 foreach (System.Windows.Forms.Control d in all(c)) yield return d;
             }
+        }
+
+        // --show: the pane in a window like Kainos's (DPI-unaware, as Kainos is), the waterfall fed with a few made-up
+        // signals, until the window is closed
+        private static int show(string bin, string work)
+        {
+            FakeHost host = new FakeHost(bin.EndsWith("decoder") ? Path.GetDirectoryName(bin) : bin, Path.Combine(work, "data"));
+            host.Settings["decoder"] = bin;
+            if (Environment.GetCommandLineArgs().Contains("--blurry")) host.Settings["crispwf"] = "0";
+            System.Windows.Forms.Form w = new System.Windows.Forms.Form { Text = "Digital Modes preview", Width = 1300, Height = 420, BackColor = System.Drawing.Color.FromArgb(10, 14, 28) };
+            host.Window = w;
+            DigiModesModule mod = new DigiModesModule();
+            Random rnd = new Random(3);
+            int n = 0;
+            System.Windows.Forms.Timer feed = new System.Windows.Forms.Timer { Interval = (int)(SpectrumMaker.LineSeconds * 1000) };
+            feed.Tick += (s, e) =>
+            {
+                UI.CrispHost ch = all(w).OfType<UI.CrispHost>().FirstOrDefault();
+                if (ch == null) return;
+                if (n == 0) w.Text += ch.Crisp ? "  (waterfall crisp, " + UI.CrispHost.DpiScale(ch.Content) * 100 + " %)" : "  (waterfall not crisp: " + ch.NotCrispBecause + ")";
+                float[] line = new float[SpectrumMaker.Bins];
+                for (int k = 0; k < line.Length; k++) line[k] = -60 + (float)(gauss(rnd) * 2);
+                int[] at = { 300, 520, 700, 1015, 1240, 1390, 1610, 1830, 2210, 2560 };
+                for (int j = 0; j < at.Length; j++)
+                    if (((n / 60) + j) % 3 != 0)
+                        for (int k = at[j] * SpectrumMaker.Bins / 3000; k < (at[j] + 50) * SpectrumMaker.Bins / 3000; k++) line[k] = -40 + j * 2 + (float)(gauss(rnd) * 3);
+                ((UI.FreqStrip)ch.Content).AddLine(line, 1000 + n * SpectrumMaker.LineSeconds);
+                n++;
+            };
+            w.Shown += (s, e) => { mod.Start(host); host.Menus[0].Click(); feed.Start(); };
+            System.Windows.Forms.Application.Run(w);
+            feed.Dispose();
+            mod.Stop();
+            mod.Dispose();
+            return 0;
         }
 
         private static void pump(int ms)
