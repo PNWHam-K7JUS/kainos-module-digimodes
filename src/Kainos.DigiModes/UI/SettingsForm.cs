@@ -1,6 +1,7 @@
 /*  SettingsForm.cs
 
-The FT8 / FT4 settings: transmit level and timing, decoding depth, where the decoder is.
+The FT8 / FT4 settings: transmit level and timing, decoding, the decoder's folder; logging; and WSJT-X's UDP
+messages for other programs.
 
 This file is part of the Kainos Digital Modes module. Copyright (C) 2026 Justin Cron K7JUS. GPLv3 or later.
 */
@@ -9,7 +10,6 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
-using System.IO;
 using System.Windows.Forms;
 using Kainos.Modules;
 
@@ -19,9 +19,9 @@ namespace Kainos.DigiModes.UI
     {
         private readonly IKainosHost _host;
         private readonly DigiEngine _e;
-        private readonly NumericUpDown _level, _lead, _rxlat, _depth, _watchdog;
-        private readonly CheckBox _stop73;
-        private readonly TextBox _decoder;
+        private readonly NumericUpDown _level, _lead, _rxlat, _depth, _watchdog, _port;
+        private readonly CheckBox _stop73, _logPrompt, _udpOn, _udpAccept;
+        private readonly TextBox _decoder, _power, _op, _udpHost, _udpId;
 
         public SettingsForm(IKainosHost host, DigiEngine e)
         {
@@ -32,36 +32,55 @@ namespace Kainos.DigiModes.UI
             MaximizeBox = MinimizeBox = false;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(520, 330);
+            ToolTip tips = new ToolTip();
 
-            int y = 14;
+            // ---- left: transmitting and decoding ----
+            int x0 = 14, y = 14;
+            Func<string, int> heading = t => { Controls.Add(new Label { Text = t, Location = new Point(x0, y), AutoSize = true, Font = new Font(Font, FontStyle.Bold) }); y += 24; return y; };
             Func<string, decimal, decimal, decimal, decimal, string, NumericUpDown> row = (label, min, max, val, inc, tip) =>
             {
-                Label l = new Label { Text = label, Location = new Point(14, y + 3), AutoSize = true };
-                NumericUpDown n = new NumericUpDown { Location = new Point(250, y), Width = 80, Minimum = min, Maximum = max, Increment = inc, DecimalPlaces = inc < 1 ? 1 : 0 };
+                Controls.Add(new Label { Text = label, Location = new Point(x0, y + 3), AutoSize = true });
+                NumericUpDown n = new NumericUpDown { Location = new Point(x0 + 230, y), Width = 80, Minimum = min, Maximum = max, Increment = inc };
                 n.Value = Math.Max(min, Math.Min(max, val));
-                new ToolTip().SetToolTip(n, tip);
-                Controls.Add(l);
+                tips.SetToolTip(n, tip);
                 Controls.Add(n);
                 y += 30;
                 return n;
             };
+            Func<string, bool, string, CheckBox> check = (label, on, tip) =>
+            {
+                CheckBox c = new CheckBox { Text = label, Location = new Point(x0, y), AutoSize = true, Checked = on };
+                tips.SetToolTip(c, tip);
+                Controls.Add(c);
+                y += 28;
+                return c;
+            };
+            Func<string, string, int, string, TextBox> text = (label, value, w, tip) =>
+            {
+                Controls.Add(new Label { Text = label, Location = new Point(x0, y + 3), AutoSize = true });
+                TextBox t = new TextBox { Location = new Point(x0 + 150, y), Width = w, Text = value };
+                tips.SetToolTip(t, tip);
+                Controls.Add(t);
+                y += 30;
+                return t;
+            };
+
+            heading("Transmitting and decoding");
             _level = row("Transmit audio level (dB)", -40, 0, (decimal)e.LevelDb, 1,
                 "The level of the FT8 / FT4 audio into the transmitter. Set it so the ALC barely moves, as for any digital mode.");
             _lead = row("Start transmitting early (ms)", 0, 1000, (decimal)e.TxLeadMs, 10,
                 "Makes up for the delay through the transmit path, so others see your DT near 0.0.");
             _rxlat = row("Receive delay (ms)", 0, 1000, (decimal)e.RxLatencyMs, 10,
                 "The delay through the receive path. Raise it if every station's DT reads high by the same amount.");
-            _depth = row("Decoding depth (1 fast - 3 deep)", 1, 3, e.Decoder.Depth, 1, "jt9's decoding depth. 3 finds the most, using more CPU.");
+            _depth = row("Decoding depth (1 fast - 3 deep)", 1, 3, e.Decoder.Depth, 1,
+                "jt9's decoding depth for the end-of-period pass. 3 finds the most, using more CPU. (The early pass, which chooses your reply, uses 2 at most.)");
             _watchdog = row("Tx watchdog (minutes)", 1, 60, e.WatchdogMinutes, 1, "Transmitting stops when you haven't touched anything for this long.");
-            _stop73 = new CheckBox { Text = "Stop transmitting when the QSO ends (73)", Location = new Point(14, y), AutoSize = true, Checked = e.StopAfter73 };
-            Controls.Add(_stop73);
-            y += 32;
+            _stop73 = check("Stop transmitting when the QSO ends (73)", e.StopAfter73, "As WSJT-X does: after 73, transmitting is turned off.");
 
-            Controls.Add(new Label { Text = "Decoder folder (jt9.exe and ft8code.exe)", Location = new Point(14, y), AutoSize = true });
+            Controls.Add(new Label { Text = "Decoder folder (jt9.exe and ft8code.exe)", Location = new Point(x0, y), AutoSize = true });
             y += 20;
-            _decoder = new TextBox { Location = new Point(14, y), Width = 400, Text = host.GetSetting("decoder", "") };
-            Button browse = new Button { Text = "Browse...", Location = new Point(420, y - 1), Width = 86 };
+            _decoder = new TextBox { Location = new Point(x0, y), Width = 230, Text = host.GetSetting("decoder", "") };
+            Button browse = new Button { Text = "Browse...", Location = new Point(x0 + 236, y - 1), Width = 80 };
             browse.Click += (s, a) =>
             {
                 using (FolderBrowserDialog d = new FolderBrowserDialog { Description = "The folder with jt9.exe (WSJT-X's bin folder)" })
@@ -70,20 +89,46 @@ namespace Kainos.DigiModes.UI
             Controls.Add(_decoder);
             Controls.Add(browse);
             y += 26;
-            Controls.Add(new Label { Text = "Empty: the decoder that came with the module, else WSJT-X's if installed. In use: " + (e.Decoder.Jt9Exe ?? "none"), Location = new Point(14, y), Size = new Size(490, 32), ForeColor = SystemColors.GrayText });
-            y += 36;
+            Controls.Add(new Label { Text = "Empty: the decoder that came with the module. In use:\r\n" + (e.Decoder.Jt9Exe ?? "none"), Location = new Point(x0, y), Size = new Size(320, 44), ForeColor = SystemColors.GrayText });
+            int leftBottom = y + 44;
 
-            LinkLabel log = new LinkLabel { Text = "Open the log folder (kainos-digimodes.adi)", Location = new Point(14, y + 4), AutoSize = true };
+            // ---- right: logging, and other programs ----
+            x0 = 360; y = 14;
+            heading("Logging");
+            _logPrompt = check("Ask before logging (the Log QSO window)", host.GetSetting("logprompt", "1") == "1",
+                "On: a finished QSO opens Log QSO, to check or add to it before it's logged. Off: it's logged straight away.");
+            _power = text("Tx power", host.GetSetting("power", ""), 80, "Filled in on each QSO (for example 5W).");
+            _op = text("Operator", host.GetSetting("operator", ""), 110, "Filled in on each QSO, when someone else operates your station.");
+            _op.CharacterCasing = CharacterCasing.Upper;
+            LinkLabel log = new LinkLabel { Text = "Open the log folder (kainos-digimodes.adi)", Location = new Point(x0, y), AutoSize = true };
             log.LinkClicked += (s, a) => { try { Process.Start("explorer.exe", "\"" + host.DataFolder + "\""); } catch { } };
             Controls.Add(log);
+            y += 34;
 
-            Button ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(340, y), Width = 80 };
-            Button cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(426, y), Width = 80 };
+            heading("Other programs (WSJT-X UDP)");
+            _udpOn = check("Send decodes, status and logged QSOs", host.GetSetting("udp", "1") == "1",
+                "WSJT-X's UDP messages, for GridTracker, JTAlert, N1MM+, Log4OM, HRD, DXKeeper and others: set them up as for WSJT-X.");
+            _udpHost = text("Address", host.GetSetting("udphost", "127.0.0.1"), 120, "127.0.0.1 for programs on this PC (WSJT-X's default), or a multicast group such as 224.0.0.1 for several.");
+            int port;
+            if (!int.TryParse(host.GetSetting("udpport", "2237"), out port)) port = 2237;
+            Controls.Add(new Label { Text = "Port", Location = new Point(x0, y + 3), AutoSize = true });
+            _port = new NumericUpDown { Location = new Point(x0 + 150, y), Width = 80, Minimum = 1, Maximum = 65535, Value = Math.Max(1, Math.Min(65535, port)) };
+            tips.SetToolTip(_port, "2237 is WSJT-X's default.");
+            Controls.Add(_port);
+            y += 30;
+            _udpId = text("Name sent", host.GetSetting("udpid", "Kainos"), 120, "How the other programs list this station. A few only accept \"WSJT-X\".");
+            _udpAccept = check("Accept their requests (answer a station, halt, free text)", host.GetSetting("udpaccept", "1") == "1",
+                "Double-clicking a station in GridTracker (or JTAlert's callsign) answers it here, as double-clicking a decode does.");
+            int rightBottom = y;
+
+            y = Math.Max(leftBottom, rightBottom) + 8;
+            Button ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(560, y), Width = 80 };
+            Button cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(646, y), Width = 80 };
             Controls.Add(ok);
             Controls.Add(cancel);
             AcceptButton = ok;
             CancelButton = cancel;
-            ClientSize = new Size(520, y + 40);
+            ClientSize = new Size(740, y + 40);
             ok.Click += (s, a) => apply();
         }
 
@@ -103,6 +148,14 @@ namespace Kainos.DigiModes.UI
             _host.SetSetting("watchdog", _e.WatchdogMinutes.ToString());
             _host.SetSetting("stop73", _e.StopAfter73 ? "1" : "0");
             _host.SetSetting("decoder", _decoder.Text.Trim());
+            _host.SetSetting("logprompt", _logPrompt.Checked ? "1" : "0");
+            _host.SetSetting("power", _power.Text.Trim());
+            _host.SetSetting("operator", _op.Text.Trim());
+            _host.SetSetting("udp", _udpOn.Checked ? "1" : "0");
+            _host.SetSetting("udphost", _udpHost.Text.Trim());
+            _host.SetSetting("udpport", ((int)_port.Value).ToString());
+            _host.SetSetting("udpid", _udpId.Text.Trim());
+            _host.SetSetting("udpaccept", _udpAccept.Checked ? "1" : "0");
             DigiModesModule.FindDecoder(_host, _e);
         }
     }

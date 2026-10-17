@@ -1,4 +1,4 @@
-/*  DigiModesModule.cs
+﻿/*  DigiModesModule.cs
 
 Kainos Digital Modes: FT8 and FT4 inside Kainos, as a downloadable module (Setup > Modules).
 The decoding is WSJT-X's (jt9, shipped in the module's decoder folder); the encoder, timing, sequencing and the
@@ -48,14 +48,22 @@ namespace Kainos.DigiModes
             _pane.Closed += (s, e) => close();
             _view.PopToggled += () => _pane.Popped = !_pane.Popped;
             _menu = host.AddMenuItem("FT8 / FT4", "FT8 and FT4 (the Digital Modes module): open / close.", () => { if (_pane.IsOpen) close(); else open(); });
+            // WSJT-X's UDP messages, for GridTracker, JTAlert and the loggers (Net/UdpBridge.cs)
+            _udp = new Net.UdpBridge(host, _engine, _view, ModuleVersion);
+            _view.SettingsChanged += () => _udp.Apply();
             if (host.GetSetting("open", "0") == "1") open();
         }
+
+        internal static string ModuleVersion { get { System.Version v = typeof(DigiModesModule).Assembly.GetName().Version; return v.Major + "." + v.Minor + "." + v.Build; } }
+
+        private Net.UdpBridge _udp;
 
         private void open()
         {
             _pane.Open();
             _engine.Relisten();
             _engine.Start();
+            _udp.Apply();
             _menu.Checked = true;
             _host.SetSetting("open", "1");
         }
@@ -63,6 +71,7 @@ namespace Kainos.DigiModes
         private void close()
         {
             _engine.Stop();
+            _udp.Dispose();
             _pane.Close();
             _host.SetMarkers(0, null);
             _host.SetMarkers(1, null);
@@ -73,6 +82,7 @@ namespace Kainos.DigiModes
         public void Stop()
         {
             if (_engine != null) _engine.Stop();
+            if (_udp != null) _udp.Dispose();
         }
 
         public void Dispose()

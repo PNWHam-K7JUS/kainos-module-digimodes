@@ -6,7 +6,8 @@ A module for [Kainos](https://github.com/PNWHam-K7JUS/Kainos), the Hermes Lite 2
 - **Automatic sequencing** of the standard QSO (Tx1 to Tx6), as WSJT-X does it. A free-text Tx7 is there too.
 - An **audio frequency strip**: left-click sets RX, right-click (or Shift-click) sets TX. The panadapter shows RX and TX lines.
 - **Band menu**: tunes to the band's FT8 or FT4 frequency and sets DIGU.
-- **ADIF log**: each completed QSO is added to `kainos-digimodes.adi` (Settings, "Open the log folder").
+- **Log QSO**: when a QSO completes, a window opens with its details filled in. You can check or add to them before logging, or turn the window off to log straight away. Each QSO is added to `kainos-digimodes.adi` (Settings, "Open the log folder").
+- **Works with GridTracker, JTAlert, N1MM+, Log4OM, HRD, DXKeeper and others.** The module sends WSJT-X's UDP messages to 127.0.0.1:2237 by default: decodes, status, and logged QSOs (as a QSO message and as ADIF). It also takes their requests: double-click a station in GridTracker to answer it, halt TX, send free text, or replay recent decodes. Set those programs up as you would for WSJT-X.
 - **Tx watchdog** and **Halt Tx**. Transmitting also stops if the radio is un-keyed elsewhere.
 
 ## Installing

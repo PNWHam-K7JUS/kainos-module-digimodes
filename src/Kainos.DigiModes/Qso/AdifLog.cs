@@ -1,4 +1,4 @@
-/*  AdifLog.cs
+﻿/*  AdifLog.cs
 
 QSOs appended to an ADIF file (DataFolder\kainos-digimodes.adi), which any logging program can import.
 
@@ -15,11 +15,18 @@ namespace Kainos.DigiModes.Qso
 {
     internal static class AdifLog
     {
-        public static void Append(string path, QsoRecord q, FtxMode mode, string myCall, string myGrid)
+        // appends the QSO; returns its ADIF record (for the programs told over UDP)
+        public static string Append(string path, QsoRecord q, FtxMode mode, string myCall, string myGrid)
         {
+            string rec = Record(q, mode, myCall, myGrid);
             bool fresh = !File.Exists(path);
+            File.AppendAllText(path, (fresh ? "Kainos Digital Modes log\r\n<ADIF_VER:5>3.1.4 <PROGRAMID:22>Kainos Digital Modes <EOH>\r\n" : "") + rec + "\r\n", Encoding.ASCII);
+            return rec;
+        }
+
+        public static string Record(QsoRecord q, FtxMode mode, string myCall, string myGrid)
+        {
             StringBuilder sb = new StringBuilder();
-            if (fresh) sb.Append("Kainos Digital Modes log\r\n<ADIF_VER:5>3.1.4 <PROGRAMID:22>Kainos Digital Modes <EOH>\r\n");
             f(sb, "CALL", q.Call);
             f(sb, "GRIDSQUARE", q.Grid);
             if (mode == FtxMode.FT8) f(sb, "MODE", "FT8");
@@ -36,10 +43,14 @@ namespace Kainos.DigiModes.Qso
                 f(sb, "FREQ", mhz.ToString("0.000000", CultureInfo.InvariantCulture));
                 f(sb, "BAND", Bands.AdifBand(q.DialHz));
             }
+            f(sb, "NAME", q.Name);
+            f(sb, "TX_PWR", q.TxPower);
+            f(sb, "COMMENT", q.Comments);
+            f(sb, "OPERATOR", q.Operator);
             f(sb, "STATION_CALLSIGN", myCall);
             f(sb, "MY_GRIDSQUARE", myGrid);
-            sb.Append("<EOR>\r\n");
-            File.AppendAllText(path, sb.ToString(), Encoding.ASCII);
+            sb.Append("<EOR>");
+            return sb.ToString();
         }
 
         private static void f(StringBuilder sb, string name, string v)

@@ -1,4 +1,4 @@
-/*  DigiPane.cs
+﻿/*  DigiPane.cs
 
 The FT8 / FT4 window: a bar of settings, the audio frequency strip, band activity, the RX frequency (my QSO)
 list and the QSO panel with the six standard messages.
@@ -43,6 +43,7 @@ namespace Kainos.DigiModes.UI
         private readonly List<DecodeLine> _slotDecodes = new List<DecodeLine>();
 
         public event Action PopToggled;
+        public event Action SettingsChanged;       // the settings window was OKed
 
         public DigiPane(IKainosHost host, DigiEngine engine)
         {
@@ -69,7 +70,7 @@ namespace Kainos.DigiModes.UI
             _enable = btn("Enable Tx", "Transmit the next message in your periods");
             _halt = btn("Halt Tx", "Stop transmitting now");
             _pop = btn("Pop out", "Docked under the panadapter, or in its own window");
-            _settings = btn("...", "Settings: transmit level, timing, decoder");
+            _settings = btn("Settings", "Transmit level and timing, decoding, logging, and other programs (WSJT-X UDP)");
             _hold.Toggle = _auto.Toggle = true;
 
             _status = new Label { ForeColor = _t.Dim, BackColor = _t.Bg, AutoSize = false, TextAlign = ContentAlignment.MiddleLeft, Font = _t.Font(_t.S(11), false) };
@@ -134,7 +135,7 @@ namespace Kainos.DigiModes.UI
             place(_hold, 64); place(_second, 56); place(_auto, 68); x += pad;
             place(_enable, 76); place(_halt, 64);
             int right = Width - pad;
-            _settings.SetBounds(right - _t.S(30), y, _t.S(30), bh); right -= _t.S(30) + pad;
+            _settings.SetBounds(right - _t.S(64), y, _t.S(64), bh); right -= _t.S(64) + pad;
             _pop.SetBounds(right - _t.S(64), y, _t.S(64), bh); right -= _t.S(64) + pad;
             _clock.SetBounds(right - _t.S(140), y, _t.S(140), bh); right -= _t.S(140) + pad;
             _status.SetBounds(x + pad, y, Math.Max(0, right - x - pad), bh);
@@ -292,19 +293,37 @@ namespace Kainos.DigiModes.UI
             refreshQso();
         }
 
+        // a QSO is complete: Log QSO (unless logging without asking), then the ADIF file and QsoCommitted (UDP)
+        public event Action<QsoRecord, FtxMode, string> QsoCommitted;      // the QSO, its mode, its ADIF record
+
         private void logged(QsoRecord q)
         {
-            q.Mode = _e.Mode.ToString();
+            FtxMode mode = _e.Mode;
+            q.Mode = mode.ToString();
             q.DialHz = _host.Radio.VfoHz(_host.Radio.TxReceiver);
             q.AudioHz = _e.TxFreq;
+            q.TxPower = _host.GetSetting("power", "");
+            q.Operator = _host.GetSetting("operator", "");
+            if (_host.GetSetting("logprompt", "1") == "1")
+            {
+                Bands.Band b = Bands.Of(q.DialHz);
+                using (LogQsoForm f = new LogQsoForm(q, b != null ? b.Name : ""))
+                    if (f.ShowDialog(FindForm()) != DialogResult.OK) { status("Not logged: " + q.Call); return; }
+            }
             try
             {
                 string path = System.IO.Path.Combine(_host.DataFolder, "kainos-digimodes.adi");
-                AdifLog.Append(path, q, _e.Mode, _e.Qso.MyCall, _e.Qso.MyGrid);
+                string rec = AdifLog.Append(path, q, mode, _e.Qso.MyCall, _e.Qso.MyGrid);
                 status("Logged " + q.Call + " (" + q.RstSent + " / " + q.RstRcvd + ") to kainos-digimodes.adi");
+                QsoCommitted?.Invoke(q, mode, rec);
             }
             catch (Exception ex) { status("Couldn't write the log: " + ex.Message); }
         }
+
+        // another program (over UDP) asked to answer a decode, as a double-click here would
+        public void AnswerExternal(DecodeLine d) { answer(d); }
+
+        public void RefreshAll() { refreshAll(); }
 
         // ---- showing state ----
 
@@ -320,7 +339,7 @@ namespace Kainos.DigiModes.UI
             _clock.ForeColor = _e.Transmitting ? _t.Tx : _t.Gold;
             if (_statusText.Length > 0 && (now - _statusAt).TotalSeconds > 20) { _statusText = ""; _status.Text = ""; }
             if (_statusText.Length == 0)
-                _status.Text = !_e.Decoder.Available ? "Decoder (jt9.exe) not found: see Settings (...)" :
+                _status.Text = !_e.Decoder.Available ? "Decoder (jt9.exe) not found: see Settings" :
                                !_e.Listening ? "Not listening" : "";
             // the markers on the panadapter: RX (gold) and TX (red) at their audio frequencies above the VFO
             int rx = _e.Rx;
@@ -410,7 +429,7 @@ namespace Kainos.DigiModes.UI
             using (SettingsForm f = new SettingsForm(_host, _e))
             {
                 _t.Style(f);
-                if (f.ShowDialog(FindForm()) == DialogResult.OK) refreshAll();
+                if (f.ShowDialog(FindForm()) == DialogResult.OK) { refreshAll(); SettingsChanged?.Invoke(); }
             }
         }
     }

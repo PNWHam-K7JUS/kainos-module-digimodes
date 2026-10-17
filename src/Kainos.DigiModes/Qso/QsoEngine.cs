@@ -24,6 +24,7 @@ namespace Kainos.DigiModes.Qso
     internal class QsoRecord
     {
         public string Call, Grid, RstSent, RstRcvd, Mode;
+        public string Name = "", Comments = "", TxPower = "", Operator = "";
         public DateTime On, Off;
         public double DialHz;
         public int AudioHz;

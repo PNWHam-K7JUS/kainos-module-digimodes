@@ -15,6 +15,7 @@ using System.Linq;
 using Kainos.DigiModes.Decode;
 using Kainos.DigiModes.Ftx;
 using Kainos.DigiModes.Qso;
+using Kainos.DigiModes.Net;
 
 namespace Kainos.DigiModes.SelfTest
 {
@@ -143,6 +144,69 @@ namespace Kainos.DigiModes.SelfTest
                 List<DecodeLine> p = Jt9Decoder.Parse("120015 -12  0.3 1234 ~  K7JUS K1ABC FN42           a1\n120015  -3 -0.1  456 ~  CQ W1AW FN31\n120015  -3 -0.1  456 ~  CQ W1AW FN31\n<DecodeFinished>   0   2        0\n",
                     new DateTime(2026, 10, 16, 12, 0, 15, DateTimeKind.Utc), FtxMode.FT8);
                 check(p.Count == 2 && p[0].Ap && p[0].Message == "K7JUS K1ABC FN42" && p[1].Snr == -3 && p[1].Freq == 456, "jt9 output parsed");
+            }
+
+            // 9. WSJT-X UDP: a stand-in GridTracker on a local port gets our heartbeat, a decode and a logged QSO in
+            // WSJT-X's format, and its Reply and Halt Tx come back to us
+            {
+                check(Net.QWriter.JulianDay(new DateTime(2026, 10, 16)) == 2461330, "QDateTime Julian day (2026-10-16 = 2461330)");
+                using (System.Net.Sockets.UdpClient gt = new System.Net.Sockets.UdpClient(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 0)))
+                using (Net.WsjtxUdp link = new Net.WsjtxUdp("Kainos Digital Modes test", "kainos") { Id = "Kainos" })
+                {
+                    gt.Client.ReceiveTimeout = 3000;
+                    int port = ((System.Net.IPEndPoint)gt.Client.LocalEndPoint).Port;
+                    string why;
+                    check(link.Start("127.0.0.1", port, out why), "UDP link starts" + (why != null ? ": " + why : ""));
+                    WsjtxReply gotReply = null;
+                    bool? gotHalt = null;
+                    link.Reply += r => gotReply = r;
+                    link.HaltTx += a => gotHalt = a;
+
+                    System.Net.IPEndPoint from = null;
+                    Func<uint, byte[]> next = type =>
+                    {
+                        for (int i = 0; i < 10; i++)
+                        {
+                            byte[] b = gt.Receive(ref from);
+                            Net.QReader h = new Net.QReader(b);
+                            if (h.U32() == Net.WsjtxUdp.Magic && h.U32() >= 2 && h.U32() == type) return b;
+                        }
+                        return null;
+                    };
+                    byte[] hb = next(0);
+                    Net.QReader q = new Net.QReader(hb);
+                    q.U32(); q.U32(); q.U32();
+                    check(hb != null && q.Utf8() == "Kainos" && q.U32() == 3 && q.Utf8() == "Kainos Digital Modes test", "heartbeat in WSJT-X's format");
+
+                    DateTime slot = new DateTime(2026, 10, 16, 12, 34, 45, DateTimeKind.Utc);
+                    link.Decode(true, slot, -12, 0.3, 1234, "~", "CQ K1ABC FN42", false);
+                    byte[] db = next(2);
+                    q = new Net.QReader(db);
+                    q.U32(); q.U32(); q.U32(); q.Utf8();
+                    bool isNew = q.Bool(); TimeSpan tm = q.QTime(); int snr = q.I32(); double dt = q.Double(); uint df = q.U32(); string md = q.Utf8(), msg = q.Utf8();
+                    check(isNew && tm == slot.TimeOfDay && snr == -12 && Math.Abs(dt - 0.3) < 1e-9 && df == 1234 && md == "~" && msg == "CQ K1ABC FN42" && !q.Bool() && !q.Bool() && !q.More,
+                        "decode in WSJT-X's format");
+
+                    link.QsoLogged(slot.AddMinutes(2), "K1ABC", "FN42", 14075600, "FT8", "-12", "-09", "5W", "", "", slot, "", "K7JUS", "CN87");
+                    byte[] lb = next(5);
+                    q = new Net.QReader(lb);
+                    q.U32(); q.U32(); q.U32(); q.Utf8();
+                    long jd = (long)q.U64(); TimeSpan offT = q.QTime(); byte spec = q.U8();
+                    check(jd == 2461330 && offT == slot.AddMinutes(2).TimeOfDay && spec == 1 && q.Utf8() == "K1ABC" && q.Utf8() == "FN42" && q.U64() == 14075600, "QSO logged in WSJT-X's format");
+
+                    // GridTracker double-clicks a decode, then halts TX (sent back to where our messages came from)
+                    byte[] reply = Net.WsjtxUdp.Build(WsjtxType.Reply, "Kainos", w => { w.QTime(slot); w.I32(-12); w.Double(0.3); w.U32(1234); w.Utf8("~"); w.Utf8("CQ K1ABC FN42"); w.Bool(false); w.U8(0); });
+                    gt.Send(reply, reply.Length, from);
+                    byte[] halt = Net.WsjtxUdp.Build(WsjtxType.HaltTx, "Kainos", w => w.Bool(true));
+                    gt.Send(halt, halt.Length, from);
+                    byte[] other = Net.WsjtxUdp.Build(WsjtxType.HaltTx, "WSJT-X", w => w.Bool(false));      // for another station: ignored
+                    gt.Send(other, other.Length, from);
+                    DateTime until = DateTime.UtcNow.AddSeconds(3);
+                    while ((gotReply == null || gotHalt == null) && DateTime.UtcNow < until) System.Threading.Thread.Sleep(20);
+                    System.Threading.Thread.Sleep(200);
+                    check(gotReply != null && gotReply.Message == "CQ K1ABC FN42" && gotReply.Df == 1234 && gotReply.Snr == -12 && gotReply.Time == slot.TimeOfDay, "Reply from another program arrives");
+                    check(gotHalt == true, "Halt Tx (auto only) arrives, and one for another station is ignored");
+                }
             }
 
             // 8. a whole QSO in simulated time: K1ABC calls CQ, we answer it, and each of our replies must go out in the
