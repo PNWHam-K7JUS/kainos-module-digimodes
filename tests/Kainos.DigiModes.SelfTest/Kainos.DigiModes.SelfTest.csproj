@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="12.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{2E7F4A19-6C3B-4D85-B1A0-5F9C8E2D7B64}</ProjectGuid>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Kainos.DigiModes.SelfTest</RootNamespace>
+    <AssemblyName>Kainos.DigiModes.SelfTest</AssemblyName>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <LangVersion>7.3</LangVersion>
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <Prefer32Bit>false</Prefer32Bit>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+    <KainosBin Condition=" '$(KainosBin)' == '' ">$(MSBuildThisFileDirectory)..\..\..\Kainos\Project Files\bin\x64\Release\</KainosBin>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="Kainos.ModuleApi">
+      <HintPath>$(KainosBin)Kainos.ModuleApi.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Kainos.DigiModes\Kainos.DigiModes.csproj">
+      <Project>{9C3A5E21-4B7D-4F08-A6E2-1D8B3C7F5A90}</Project>
+      <Name>Kainos.DigiModes</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>

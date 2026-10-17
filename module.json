@@ -1,0 +1,12 @@
+{
+  "id": "digimodes",
+  "name": "Digital Modes (FT8 / FT4)",
+  "description": "FT8 and FT4 inside Kainos: band activity, automatic QSO sequencing and an ADIF log, in the Kainos look. Decoding by WSJT-X's jt9 (included).",
+  "version": "0.1.0",
+  "api": 1,
+  "minKainos": "1.0.11",
+  "entry": "Kainos.DigiModes.dll",
+  "author": "Justin Cron K7JUS",
+  "license": "GPL-3.0-or-later",
+  "homepage": "https://github.com/PNWHam-K7JUS/kainos-module-digimodes"
+}
