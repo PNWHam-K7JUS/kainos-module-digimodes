@@ -220,14 +220,20 @@ namespace Kainos.DigiModes.UI
         }
     }
 
-    // 0 - 3000 Hz of audio: the decodes of the last period as ticks, RX (gold) and TX (red) frequencies.
-    // Left click sets RX, right click (or Shift + click) sets TX.
+    // 0 - 3000 Hz of audio (what's inside the DIGU passband), like a one-line waterfall: each station decoded in the
+    // last period is a block at its audio frequency, as wide as its signal, labelled with its callsign (gold: calling CQ).
+    // RX is the gold line, TX the red dashed one. Left click sets RX, right click (or Shift + click) sets TX; hovering
+    // over a block shows its message.
     internal class FreqStrip : Control
     {
         private readonly IKainosTheme _t;
         public int Rx = 1500, Tx = 1500, BandwidthHz = 50;
         public int MaxHz = 3000;
         private List<DecodeLine> _last = new List<DecodeLine>();
+        private readonly ToolTip _tip = new ToolTip { InitialDelay = 200, ReshowDelay = 100 };
+        private string _tipText = "";
+        private const string Hint = "Audio frequency (Hz) in your DIGU passband: a block is a station heard in the last period (gold = calling CQ).\r\n" +
+                                    "Left-click: receive here (RX, gold line).   Right-click or Shift+click: transmit here (TX, red line).";
 
         public event Action<int> RxClicked, TxClicked;
 
@@ -237,11 +243,22 @@ namespace Kainos.DigiModes.UI
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
             BackColor = t.Surface;
             Cursor = Cursors.Cross;
+            _tip.SetToolTip(this, Hint);
         }
+
+        protected override void Dispose(bool disposing) { if (disposing) _tip.Dispose(); base.Dispose(disposing); }
 
         public void SetDecodes(List<DecodeLine> d) { _last = d ?? new List<DecodeLine>(); Invalidate(); }
 
         private float x(double hz) { return (float)(hz / MaxHz * (Width - 1)); }
+
+        // the station a decode is from: the call after CQ (and any CQ modifier), else the second word
+        internal static string Sender(string msg)
+        {
+            string[] w = (msg ?? "").Split(' ');
+            if (w.Length >= 2 && w[0] == "CQ") return w.Length >= 3 && w[1].Length <= 4 && !w[1].Any(char.IsDigit) ? w[2] : w[1];
+            return w.Length >= 2 ? w[1].Trim('<', '>') : msg;
+        }
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
@@ -251,30 +268,65 @@ namespace Kainos.DigiModes.UI
             base.OnMouseDown(e);
         }
 
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            double hz = e.X / (double)Math.Max(1, Width - 1) * MaxHz;
+            DecodeLine d = _last.FirstOrDefault(l => hz >= l.Freq && hz <= l.Freq + BandwidthHz);
+            string t = d != null ? d.Freq + " Hz  " + d.Snr.ToString("+0;-0") + " dB   " + d.Message + "\r\nLeft-click: RX here.  Right-click: TX here." : Hint;
+            if (t != _tipText) { _tipText = t; _tip.SetToolTip(this, t); }
+        }
+
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
             g.Clear(_t.Surface);
-            int h = Height;
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+            int h = Height, scaleH = _t.S(11), blockH = h - scaleH - 1;
             using (Font f = _t.Font(_t.S(9.5f), false))
+            using (Font call = _t.Font(_t.S(9.5f), true))
             using (Brush fb = new SolidBrush(_t.Faint))
             using (Pen grid = new Pen(_t.Line))
             {
+                // the scale along the bottom
+                g.DrawString("AUDIO Hz", f, fb, 2, h - scaleH - 1);
                 for (int hz = 500; hz < MaxHz; hz += 500)
                 {
                     float xx = x(hz);
-                    g.DrawLine(grid, xx, h - _t.S(5), xx, h);
-                    g.DrawString(hz.ToString(), f, fb, xx + 2, h - _t.S(13));
+                    g.DrawLine(grid, xx, h - _t.S(4), xx, h);
+                    g.DrawString(hz.ToString(), f, fb, xx + 2, h - scaleH - 1);
                 }
+                // the stations, with their callsigns where there's room
+                float bw = Math.Max(2, x(BandwidthHz));
+                foreach (DecodeLine d in _last.OrderBy(l => l.Freq))
+                {
+                    bool cq = d.Message.StartsWith("CQ ");
+                    Color c = cq ? _t.Gold : _t.Ice;
+                    float bx = x(d.Freq);
+                    using (Brush b = new SolidBrush(Color.FromArgb(110, c))) g.FillRectangle(b, bx, 1, bw, blockH);
+                    string who = Sender(d.Message);
+                    SizeF sz = g.MeasureString(who, call);
+                    if (sz.Width <= bw + _t.S(30))
+                        using (Brush tb = new SolidBrush(cq ? _t.Gold : _t.Text)) g.DrawString(who, call, tb, bx + 1, 1 + (blockH - sz.Height) / 2);
+                }
+                // RX and TX, tagged at the top
+                using (Brush rb = new SolidBrush(Color.FromArgb(60, _t.Gold))) g.FillRectangle(rb, x(Rx), 0, bw, h);
+                using (Pen rp = new Pen(_t.Gold, 2)) g.DrawLine(rp, x(Rx), 0, x(Rx), h);
+                using (Pen tp = new Pen(_t.Tx, 2) { DashStyle = DashStyle.Dash }) g.DrawLine(tp, x(Tx), 0, x(Tx), h);
+                tag(g, call, "RX", x(Rx), _t.Gold, Rx <= Tx);
+                tag(g, call, "TX", x(Tx), _t.Tx, Tx < Rx);
             }
-            foreach (DecodeLine d in _last)
-            {
-                Color c = d.Message.StartsWith("CQ ") ? _t.Gold : _t.Ice;
-                using (Brush b = new SolidBrush(Color.FromArgb(150, c))) g.FillRectangle(b, x(d.Freq), 2, Math.Max(2, x(BandwidthHz)), h - _t.S(14));
-            }
-            using (Brush rb = new SolidBrush(Color.FromArgb(70, _t.Gold))) g.FillRectangle(rb, x(Rx), 0, Math.Max(2, x(BandwidthHz)), h);
-            using (Pen rp = new Pen(_t.Gold, 2)) g.DrawLine(rp, x(Rx), 0, x(Rx), h);
-            using (Pen tp = new Pen(_t.Tx, 2) { DashStyle = DashStyle.Dash }) g.DrawLine(tp, x(Tx), 0, x(Tx), h);
+        }
+
+        // a small label beside a line: on its left when `left` (so RX and TX on the same frequency don't overlap)
+        private void tag(Graphics g, Font f, string text, float lx, Color c, bool left)
+        {
+            SizeF sz = g.MeasureString(text, f);
+            float tx = left ? lx - sz.Width - 2 : lx + 3;
+            if (tx < 0) tx = lx + 3;
+            if (tx + sz.Width > Width) tx = lx - sz.Width - 2;
+            using (Brush bg = new SolidBrush(_t.Surface)) g.FillRectangle(bg, tx, 0, sz.Width, sz.Height - 2);
+            using (Brush b = new SolidBrush(c)) g.DrawString(text, f, b, tx, -1);
         }
     }
 }
