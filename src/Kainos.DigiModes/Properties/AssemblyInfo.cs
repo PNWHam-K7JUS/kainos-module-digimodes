@@ -9,6 +9,6 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyCopyright("Copyright (C) 2026 Justin Cron K7JUS, GPLv3 or later")]
 [assembly: ComVisible(false)]
 [assembly: Guid("9c3a5e21-4b7d-4f08-a6e2-1d8b3c7f5a90")]
-[assembly: AssemblyVersion("0.1.1.0")]
-[assembly: AssemblyFileVersion("0.1.1.0")]
+[assembly: AssemblyVersion("0.1.2.0")]
+[assembly: AssemblyFileVersion("0.1.2.0")]
 [assembly: InternalsVisibleTo("Kainos.DigiModes.SelfTest")]

@@ -167,6 +167,20 @@ namespace Kainos.DigiModes.SelfTest
                         stage = "resize";
                         foreach (System.Drawing.Size sz in new[] { new System.Drawing.Size(640, 200), new System.Drawing.Size(1800, 420), new System.Drawing.Size(1100, 260) })
                         { w.Size = sz; pump(200); }
+                        // the lists full (scrolling), and the docked size (236 px high at 100%): nothing may stick out
+                        // of its parent
+                        stage = "fill";
+                        foreach (UI.DecodeList l in all(w).OfType<UI.DecodeList>())
+                            for (int i = 0; i < 80; i++) l.Add(new UI.DecodeRow { Text = "120015 -12  0.3 1234  CQ K1ABC FN42", Kind = i % 5 == 0 ? UI.RowKind.Cq : UI.RowKind.Normal });
+                        foreach (int width in new[] { 1080, 1400 })
+                        {
+                            w.ClientSize = new System.Drawing.Size(width, 236);
+                            pump(300);
+                            List<string> outside = all(w).Where(c => c.Visible && c.Parent != null && c.Parent != w &&
+                                (c.Left < 0 || c.Top < 0 || c.Right > c.Parent.ClientSize.Width || c.Bottom > c.Parent.ClientSize.Height))
+                                .Select(c => c.GetType().Name + " '" + c.Text + "' " + c.Bounds + " in " + c.Parent.ClientSize).ToList();
+                            check(outside.Count == 0, "pane fits at " + width + " x 236" + (outside.Count > 0 ? ": " + string.Join("; ", outside.Take(4)) : ""));
+                        }
                         stage = "close";
                         host.Menus[0].Click();
                         pump(200);
@@ -181,6 +195,15 @@ namespace Kainos.DigiModes.SelfTest
 
             System.Console.WriteLine(_fail == 0 ? "All passed" : _fail + " failed");
             return _fail == 0 ? 0 : 1;
+        }
+
+        private static IEnumerable<System.Windows.Forms.Control> all(System.Windows.Forms.Control root)
+        {
+            foreach (System.Windows.Forms.Control c in root.Controls)
+            {
+                yield return c;
+                foreach (System.Windows.Forms.Control d in all(c)) yield return d;
+            }
         }
 
         private static void pump(int ms)

@@ -83,7 +83,8 @@ namespace Kainos.DigiModes.UI
 
             _qso = new Panel { BackColor = _t.Panel };
             Controls.Add(_qso);
-            Func<TextBox> box = () => new TextBox { BackColor = _t.Raised, ForeColor = _t.Text, BorderStyle = BorderStyle.FixedSingle, CharacterCasing = CharacterCasing.Upper, Font = _t.Font(_t.S(12), true) };
+            // AutoSize off: a text box otherwise takes its height from its font, not from the row it's given
+            Func<TextBox> box = () => new TextBox { AutoSize = false, BackColor = _t.Raised, ForeColor = _t.Text, BorderStyle = BorderStyle.FixedSingle, CharacterCasing = CharacterCasing.Upper, Font = _t.Font(_t.S(12), true) };
             _hisCall = box(); _hisGrid = box(); _free = box();
             _hisCall.MaxLength = 11; _hisGrid.MaxLength = 6; _free.MaxLength = 13;
             _qso.Controls.AddRange(new Control[] { _hisCall, _hisGrid, _free });
@@ -150,17 +151,24 @@ namespace Kainos.DigiModes.UI
 
         private void layoutQso()
         {
-            int w = _qso.Width, pad = _t.S(4), rh = Math.Max(_t.S(16), Math.Min(_t.S(22), (_qso.Height - 2 * pad - _t.S(24)) / 8));
-            int y = pad;
-            _hisCall.SetBounds(pad, y, (w - 3 * pad) * 6 / 10, rh);
-            _hisGrid.SetBounds(pad * 2 + (w - 3 * pad) * 6 / 10, y, (w - 3 * pad) * 4 / 10, rh);
-            y += rh + pad;
-            for (int i = 0; i < 6; i++) { _tx[i].SetBounds(pad, y, w - 2 * pad, rh); y += rh + 2; }
-            _free.SetBounds(pad, y, (w - 3 * pad) * 7 / 10, rh);
-            _tx[6].SetBounds(pad * 2 + (w - 3 * pad) * 7 / 10, y, (w - 3 * pad) * 3 / 10, rh);
-            y += rh + pad;
-            _cq.SetBounds(pad, y, (w - 3 * pad) / 2, rh);
-            _clear.SetBounds(pad * 2 + (w - 3 * pad) / 2, y, (w - 3 * pad) / 2, rh);
+            // nine rows: his call and grid, Tx1-Tx6, free text and Tx7, CQ and Clear; shrunk together to fit the height
+            const int rows = 9;
+            int w = _qso.Width, pad = _t.S(4), gap = 2;
+            int rh = Math.Max(14, Math.Min(_t.S(22), (_qso.Height - 2 * pad - (rows - 1) * gap) / rows));
+            float fontPx = Math.Max(9f, rh * 0.58f);
+            foreach (TextBox b in new[] { _hisCall, _hisGrid, _free })
+                if (Math.Abs(b.Font.Size - fontPx) > 0.4f) b.Font = _t.Font(fontPx, true);
+            foreach (KButton b in _tx.Concat(new[] { _cq, _clear })) b.FontPx = Math.Min(10.5f, fontPx / _t.Scale);
+            int y = pad, inner = w - 3 * pad;
+            _hisCall.SetBounds(pad, y, inner * 6 / 10, rh);
+            _hisGrid.SetBounds(pad * 2 + inner * 6 / 10, y, inner - inner * 6 / 10, rh);
+            y += rh + gap;
+            for (int i = 0; i < 6; i++) { _tx[i].SetBounds(pad, y, w - 2 * pad, rh); y += rh + gap; }
+            _free.SetBounds(pad, y, inner * 7 / 10, rh);
+            _tx[6].SetBounds(pad * 2 + inner * 7 / 10, y, inner - inner * 7 / 10, rh);
+            y += rh + gap;
+            _cq.SetBounds(pad, y, inner / 2, rh);
+            _clear.SetBounds(pad * 2 + inner / 2, y, inner - inner / 2, rh);
         }
 
         // ---- wiring ----
