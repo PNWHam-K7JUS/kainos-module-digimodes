@@ -1,4 +1,4 @@
-# Kainos Digital Modes (FT8 / FT4)
+﻿# Kainos Digital Modes (FT8 / FT4)
 
 A module for [Kainos](https://github.com/PNWHam-K7JUS/Kainos), the Hermes Lite 2 SDR program: FT8 and FT4 inside Kainos, in the Kainos look, with no virtual audio cables or CAT set-up.
 
@@ -10,6 +10,7 @@ A module for [Kainos](https://github.com/PNWHam-K7JUS/Kainos), the Hermes Lite 2
 - **Works with GridTracker, JTAlert, N1MM+, Log4OM, HRD, DXKeeper and others.** The module sends WSJT-X's UDP messages to 127.0.0.1:2237 by default: decodes, status, and logged QSOs (as a QSO message and as ADIF). It also takes their requests: double-click a station in GridTracker to answer it, halt TX, send free text, or replay recent decodes. Set those programs up as you would for WSJT-X.
 - **Waterfall** of the 0 to 3000 Hz audio, with the last period's stations labelled along its top. It takes about a third of the pane, so it grows when you drag the pane taller.
 - **PSK Reporter** (off by default; Settings): every 5 minutes the stations you decode are reported to pskreporter.info, in the same format WSJT-X uses.
+- **Worked before**: each decode shows the station's country, and a tag when it's new: **NEW DXCC**, **NEW BAND** (an entity new on this band), **NEW GRID** or **GRID BAND**. Stations already worked on this band are dimmed. This uses your QSOs here plus, if you add one in Settings, your main log exported as ADIF. Countries come from cty.dat.
 - **Tx watchdog** and **Halt Tx**. Transmitting also stops if the radio is un-keyed elsewhere.
 
 ## Installing

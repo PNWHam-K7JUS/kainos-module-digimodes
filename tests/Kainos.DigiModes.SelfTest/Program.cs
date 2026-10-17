@@ -146,6 +146,26 @@ namespace Kainos.DigiModes.SelfTest
                 check(p.Count == 2 && p[0].Ap && p[0].Message == "K7JUS K1ABC FN42" && p[1].Snr == -3 && p[1].Freq == 456, "jt9 output parsed");
             }
 
+            // 12. worked before: countries from cty.dat, and how new each sender is
+            {
+                string ctyPath = Path.Combine(Path.GetDirectoryName(bin.TrimEnd('\\')), bin.EndsWith("decoder") ? "cty.dat" : @"share\wsjtx\cty.dat");
+                if (!File.Exists(ctyPath)) ctyPath = @"C:\WSJT\wsjtx\share\wsjtx\cty.dat";
+                Cty cty = Cty.Load(ctyPath);
+                Func<string, string> c = call => { CtyEntity e = cty.Lookup(call); return e != null ? e.Name : "?"; };
+                string got = string.Join(", ", new[] { "K7JUS", "VK2XYZ", "W1AW/P", "VP2E/K1ABC", "K1ABC/KH6", "9M6/LA6VM", "W1AW/4", "JA1ABC" }.Select(x => x + "=" + c(x)));
+                check(c("K7JUS") == "United States" && c("VK2XYZ") == "Australia" && c("W1AW/P") == "United States" && c("VP2E/K1ABC") == "Anguilla" &&
+                      c("K1ABC/KH6") == "Hawaii" && c("9M6/LA6VM") == "Spratly Islands" && c("W1AW/4") == "United States" && c("JA1ABC") == "Japan", "cty.dat lookups: " + got);
+
+                Worked wk = new Worked { Cty = cty };
+                File.WriteAllText(Path.Combine(work, "test.adi"), "test\r\n<EOH>\r\n<CALL:6>VK2ABC <GRIDSQUARE:6>QF56ab <BAND:3>20m <MODE:3>FT8 <EOR>\r\n<call:5>W1AW <band:3>40M <EOR>\r\n");
+                int n = wk.LoadAdif(Path.Combine(work, "test.adi"));
+                Func<string, string, WorkedMark> m = (msg, b) => { WorkedInfo i = wk.Classify(msg, b); return i != null ? i.Mark : (WorkedMark)(-1); };
+                check(n == 2 && m("CQ JA1ABC PM95", "20M") == WorkedMark.NewDxcc && m("CQ VK3XYZ QF22", "40M") == WorkedMark.NewDxccBand &&
+                      m("CQ VK3XYZ QF22", "20M") == WorkedMark.NewGrid && m("CQ VK2ABC QF56", "20M") == WorkedMark.WorkedBand &&
+                      m("K7JUS VK2ABC RR73", "20M") == WorkedMark.WorkedBand && m("CQ W1AW FN31", "40M") == WorkedMark.NewGrid,
+                    "worked before: new DXCC, new on the band, new grid, already worked (from an ADIF log of " + n + ")");
+            }
+
             // 11. PSK Reporter: who a decode reports, and the IPFIX packet (read back field by field; nothing is sent)
             {
                 Func<string, DecodeLine> dl = m => new DecodeLine { Message = m, Snr = -7, Freq = 1234, Mode = FtxMode.FT8, SlotUtc = new DateTime(2026, 10, 16, 12, 0, 15, DateTimeKind.Utc) };

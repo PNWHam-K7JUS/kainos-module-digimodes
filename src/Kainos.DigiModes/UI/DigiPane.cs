@@ -285,14 +285,17 @@ namespace Kainos.DigiModes.UI
             if (list.Count == 0) return;
             string my = _e.Qso.MyCall, his = _e.Qso.HisCall;
             if (!_headed) { _activity.Separator(slot.ToString("HH:mm:ss") + " " + mode); _headed = true; }
+            Bands.Band band = Bands.Of(_host.Radio.VfoHz(_e.Rx));
+            string bandName = band != null ? band.Name.ToUpperInvariant() : "";
             foreach (DecodeLine d in list.OrderBy(x => x.Freq))
             {
                 string[] w = d.Message.Split(' ');
                 RowKind k = my.Length > 0 && w.Contains(my) ? RowKind.ToMe : d.Message.StartsWith("CQ ") ? RowKind.Cq : RowKind.Normal;
-                DecodeRow row = new DecodeRow { Decode = d, Text = d.ToString(), Kind = k };
+                WorkedInfo wi = Worked.Classify(d.Message, bandName);
+                DecodeRow row = new DecodeRow { Decode = d, Text = d.ToString(), Kind = k, Mark = wi != null ? wi.Mark : WorkedMark.None, Note = wi != null ? wi.Country : null };
                 _activity.Add(row);
                 bool mine = k == RowKind.ToMe || (his.Length > 0 && w.Length > 1 && w[1] == his) || Math.Abs(d.Freq - _e.RxFreq) <= 10;
-                if (mine) _rxList.Add(new DecodeRow { Decode = d, Text = d.ToString(), Kind = k });
+                if (mine) _rxList.Add(new DecodeRow { Decode = d, Text = d.ToString(), Kind = k, Mark = row.Mark, Note = row.Note });
             }
             refreshQso();
         }
@@ -319,6 +322,7 @@ namespace Kainos.DigiModes.UI
                 string path = System.IO.Path.Combine(_host.DataFolder, "kainos-digimodes.adi");
                 string rec = AdifLog.Append(path, q, mode, _e.Qso.MyCall, _e.Qso.MyGrid);
                 status("Logged " + q.Call + " (" + q.RstSent + " / " + q.RstRcvd + ") to kainos-digimodes.adi");
+                Worked.Add(q.Call, q.Grid, Bands.AdifBand(q.DialHz));
                 QsoCommitted?.Invoke(q, mode, rec);
             }
             catch (Exception ex) { status("Couldn't write the log: " + ex.Message); }
@@ -328,6 +332,31 @@ namespace Kainos.DigiModes.UI
         public void AnswerExternal(DecodeLine d) { answer(d); }
 
         public void RefreshAll() { refreshAll(); }
+
+        // ---- worked before: cty.dat and the logs (Qso/Worked.cs) ----
+
+        internal readonly Worked Worked = new Worked();
+
+        // on a thread of its own (a big log takes a moment); new decodes are marked from then on
+        public void LoadWorked()
+        {
+            string module = _host.ModuleFolder, data = _host.DataFolder, extra = _host.GetSetting("worklog", "").Trim();
+            System.Threading.ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    string cty = System.IO.Path.Combine(module, "cty.dat");
+                    if (!System.IO.File.Exists(cty)) cty = @"C:\WSJT\wsjtx\share\wsjtx\cty.dat";
+                    Worked w = Worked;
+                    w.Cty = Cty.Load(cty);
+                    w.Clear();
+                    int n = w.LoadAdif(System.IO.Path.Combine(data, "kainos-digimodes.adi"));
+                    if (extra.Length > 0) n += w.LoadAdif(extra);
+                    _host.Log("worked before: " + n + " QSOs, cty.dat " + w.Cty.Count + " prefixes");
+                }
+                catch (Exception ex) { _host.Log("worked before: " + ex.Message); }
+            });
+        }
 
         // ---- showing state ----
 

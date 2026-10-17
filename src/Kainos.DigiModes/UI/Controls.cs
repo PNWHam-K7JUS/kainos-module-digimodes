@@ -55,6 +55,8 @@ namespace Kainos.DigiModes.UI
         public DecodeLine Decode;       // null for my transmissions and separators
         public string Text;
         public RowKind Kind;
+        public Qso.WorkedMark Mark;     // how new the sender is (Qso/Worked.cs)
+        public string Note;             // the sender's country, right-aligned
     }
 
     // An owner-drawn list of decodes, newest at the bottom; it follows the bottom unless scrolled up
@@ -147,6 +149,24 @@ namespace Kainos.DigiModes.UI
             base.OnMouseUp(e);
         }
 
+        private static string markText(Qso.WorkedMark m)
+        {
+            switch (m)
+            {
+                case Qso.WorkedMark.NewDxcc: return "NEW DXCC";
+                case Qso.WorkedMark.NewDxccBand: return "NEW BAND";
+                case Qso.WorkedMark.NewGrid: return "NEW GRID";
+                case Qso.WorkedMark.NewGridBand: return "GRID BAND";
+                default: return null;
+            }
+        }
+
+        private Color markColour(Qso.WorkedMark m)
+        {
+            return m == Qso.WorkedMark.NewDxcc ? Color.FromArgb(0xff, 0x8a, 0xe6) :        // a magenta that stands out from gold and red
+                   m == Qso.WorkedMark.NewDxccBand ? _t.Violet : _t.Ice;
+        }
+
         private int rowAt(int y)
         {
             if (y < headH) return -1;
@@ -211,7 +231,35 @@ namespace Kainos.DigiModes.UI
                     if (!back.IsEmpty) using (Brush b = new SolidBrush(back)) g.FillRectangle(b, 0, y, w, rowH);
                     Color fore = r.Kind == RowKind.ToMe ? Color.White : r.Kind == RowKind.Cq ? _t.Gold : r.Kind == RowKind.Mine ? _t.Violet : _t.Text;
                     if (r.Decode != null && r.Decode.Ap) fore = Color.FromArgb(200, fore);
+                    if (r.Mark == Qso.WorkedMark.WorkedBand && r.Kind != RowKind.ToMe) fore = _t.Faint;          // already worked on this band
+                    // how new the sender is, and its country, at the right
+                    string tag = markText(r.Mark);
+                    float right = w - _t.S(4);
+                    if (!string.IsNullOrEmpty(r.Note) || tag != null)
+                    {
+                        using (Font small = _t.Font(_t.S(10.5f), false))
+                        using (Font bold = _t.Font(_t.S(10f), true))
+                        {
+                            if (!string.IsNullOrEmpty(r.Note))
+                            {
+                                SizeF ns = g.MeasureString(r.Note, small);
+                                right -= ns.Width;
+                                using (Brush nb = new SolidBrush(r.Mark == Qso.WorkedMark.WorkedBand ? _t.Faint : _t.Dim)) g.DrawString(r.Note, small, nb, right, y + 2);
+                            }
+                            if (tag != null)
+                            {
+                                SizeF ts = g.MeasureString(tag, bold);
+                                RectangleF pill = new RectangleF(right - ts.Width - _t.S(8), y + 2, ts.Width + _t.S(4), rowH - 4);
+                                Color pc = markColour(r.Mark);
+                                using (Brush pb = new SolidBrush(Color.FromArgb(70, pc))) g.FillRectangle(pb, pill);
+                                using (Brush tb2 = new SolidBrush(pc)) g.DrawString(tag, bold, tb2, pill.X + _t.S(2), y + 2);
+                                right = pill.X;
+                            }
+                        }
+                    }
+                    g.SetClip(new RectangleF(0, y, Math.Max(0, right - _t.S(4)), rowH));
                     using (Brush fb = new SolidBrush(fore)) g.DrawString(r.Text, mono, fb, _t.S(4), y + 1);
+                    g.ResetClip();
                 }
             }
             Rectangle tb = thumb();

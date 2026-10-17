@@ -21,7 +21,7 @@ namespace Kainos.DigiModes.UI
         private readonly DigiEngine _e;
         private readonly NumericUpDown _level, _lead, _rxlat, _depth, _watchdog, _port;
         private readonly CheckBox _stop73, _logPrompt, _udpOn, _udpAccept, _psk;
-        private readonly TextBox _decoder, _power, _op, _udpHost, _udpId, _pskAntenna;
+        private readonly TextBox _decoder, _power, _op, _udpHost, _udpId, _pskAntenna, _workLog;
 
         public SettingsForm(IKainosHost host, DigiEngine e)
         {
@@ -100,6 +100,20 @@ namespace Kainos.DigiModes.UI
             _power = text("Tx power", host.GetSetting("power", ""), 80, "Filled in on each QSO (for example 5W).");
             _op = text("Operator", host.GetSetting("operator", ""), 110, "Filled in on each QSO, when someone else operates your station.");
             _op.CharacterCasing = CharacterCasing.Upper;
+            Controls.Add(new Label { Text = "Worked before: also read this ADIF log", Location = new Point(x0, y), AutoSize = true });
+            y += 20;
+            _workLog = new TextBox { Location = new Point(x0, y), Width = 270, Text = host.GetSetting("worklog", "") };
+            tips.SetToolTip(_workLog, "Your main log exported as ADIF (from N1MM+, Log4OM, HRD ...), so decodes are marked NEW DXCC / NEW BAND / NEW GRID\r\n" +
+                                      "against everything you've worked, not only the QSOs made here. Read when Kainos starts and when you press OK.");
+            Button wlb = new Button { Text = "Browse...", Location = new Point(x0 + 276, y - 1), Width = 80 };
+            wlb.Click += (s, a) =>
+            {
+                using (OpenFileDialog d = new OpenFileDialog { Filter = "ADIF log (*.adi;*.adif)|*.adi;*.adif|All files|*.*", Title = "Your log, as ADIF" })
+                    if (d.ShowDialog(this) == DialogResult.OK) _workLog.Text = d.FileName;
+            };
+            Controls.Add(_workLog);
+            Controls.Add(wlb);
+            y += 30;
             LinkLabel log = new LinkLabel { Text = "Open the log folder (kainos-digimodes.adi)", Location = new Point(x0, y), AutoSize = true };
             log.LinkClicked += (s, a) => { try { Process.Start("explorer.exe", "\"" + host.DataFolder + "\""); } catch { } };
             Controls.Add(log);
@@ -162,6 +176,7 @@ namespace Kainos.DigiModes.UI
             _host.SetSetting("udpport", ((int)_port.Value).ToString());
             _host.SetSetting("udpid", _udpId.Text.Trim());
             _host.SetSetting("udpaccept", _udpAccept.Checked ? "1" : "0");
+            _host.SetSetting("worklog", _workLog.Text.Trim());
             _host.SetSetting("psk", _psk.Checked ? "1" : "0");
             _host.SetSetting("pskantenna", _pskAntenna.Text.Trim());
             DigiModesModule.FindDecoder(_host, _e);

@@ -43,6 +43,10 @@ foreach ($f in $decoder) {
     if (-not (Test-Path $p)) { throw "$p not found: point -Wsjtx at a WSJT-X install" }
     Copy-Item $p "$stage\decoder"
 }
+# cty.dat (AD1C's country file, MIT-style licence) for the DXCC lookups
+$share = Join-Path $Wsjtx "share\wsjtx"
+if (Test-Path "$share\cty.dat") { Copy-Item "$share\cty.dat" $stage; if (Test-Path "$share\cty.dat_copyright.txt") { Copy-Item "$share\cty.dat_copyright.txt" $stage } }
+else { Write-Warning "cty.dat not found in ${share}: decodes won't show countries" }
 $wsjtxDoc = Join-Path $Wsjtx "share\doc\wsjtx"
 foreach ($f in "COPYING", "AUTHORS") { if (Test-Path "$wsjtxDoc\$f") { Copy-Item "$wsjtxDoc\$f" "$stage\decoder\WSJT-X-$f.txt" } }
 

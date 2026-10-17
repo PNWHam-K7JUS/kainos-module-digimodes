@@ -61,7 +61,8 @@ namespace Kainos.DigiModes
                 long dial = (long)host.Radio.VfoHz(_engine.Rx);
                 foreach (Decode.DecodeLine d in list) _psk.Add(d, dial);
             };
-            _view.SettingsChanged += () => { _udp.Apply(); applyPsk(); };
+            _view.SettingsChanged += () => { _udp.Apply(); applyPsk(); _view.LoadWorked(); };
+            _view.LoadWorked();
             if (host.GetSetting("open", "0") == "1") open();
         }
 
