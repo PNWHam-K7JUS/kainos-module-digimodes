@@ -48,10 +48,25 @@ namespace Kainos.DigiModes.Decode
         {
             for (int i = 0; i < N; i++) { _re[i] = _buf[(_pos + i) % N] * _win[i]; _im[i] = 0; }
             Fft(_re, _im);
+            // power, smoothed a little across neighbouring bins (1-2-1) and with the line before (half each), so the
+            // noise floor reads as an even colour instead of grain; signals keep their shape
+            if (_avg == null) _avg = new double[Bins];
+            double[] p = new double[Bins];
+            for (int k = 0; k < Bins; k++) p[k] = _re[k] * _re[k] + _im[k] * _im[k];
             float[] db = new float[Bins];
-            for (int k = 0; k < Bins; k++) db[k] = (float)(10 * Math.Log10(_re[k] * _re[k] + _im[k] * _im[k] + 1e-20));
+            for (int k = 0; k < Bins; k++)
+            {
+                double s = (p[Math.Max(0, k - 1)] + 2 * p[k] + p[Math.Min(Bins - 1, k + 1)]) / 4;
+                _avg[k] = _first ? s : _avg[k] * Smooth + s * (1 - Smooth);
+                db[k] = (float)(10 * Math.Log10(_avg[k] + 1e-20));
+            }
+            _first = false;
             return db;
         }
+
+        private double[] _avg;
+        private bool _first = true;
+        public double Smooth = 0.5;         // 0: no smoothing over time
 
         // in-place radix-2 FFT
         internal static void Fft(double[] re, double[] im)

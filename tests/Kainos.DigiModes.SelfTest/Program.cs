@@ -238,6 +238,24 @@ namespace Kainos.DigiModes.SelfTest
                 check(lines.Count == 3 && (peak == 341 || peak == 342), "waterfall FFT (4096 points, half overlap): 1000 Hz in bin " + peak + ", " + lines.Count + " lines from 8192 samples");
             }
 
+            // 10b. the waterfall's smoothing evens out the noise floor (less spread in dB from bin to bin), signals stay
+            {
+                Func<double, double> spread = sm =>
+                {
+                    SpectrumMaker m = new SpectrumMaker { Smooth = sm };
+                    Random r2 = new Random(11);
+                    float[] noise = new float[SpectrumMaker.N * 6];
+                    for (int i = 0; i < noise.Length; i++) noise[i] = (float)(gauss(r2) * 0.01);
+                    List<float[]> ls = new List<float[]>();
+                    m.Push(noise, noise.Length, ls);
+                    float[] last = ls[ls.Count - 1];
+                    double mean = last.Average();
+                    return Math.Sqrt(last.Select(v => (v - mean) * (v - mean)).Average());
+                };
+                double raw = spread(0), smooth = spread(0.5);
+                check(smooth < raw * 0.75, "waterfall smoothing: noise floor spread " + raw.ToString("0.0") + " dB raw, " + smooth.ToString("0.0") + " dB smoothed");
+            }
+
             // 9. WSJT-X UDP: a stand-in GridTracker on a local port gets our heartbeat, a decode and a logged QSO in
             // WSJT-X's format, and its Reply and Halt Tx come back to us
             {

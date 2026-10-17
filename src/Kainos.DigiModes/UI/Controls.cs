@@ -446,8 +446,9 @@ namespace Kainos.DigiModes.UI
         // the Kainos colours: navy, deep blue, ice, gold, white
         private static int[] makePalette(IKainosTheme t)
         {
-            Color[] stops = { t.Bg, Color.FromArgb(12, 44, 92), t.Ice, t.Gold, Color.White };
-            double[] at = { 0, 0.30, 0.62, 0.86, 1 };
+            // the noise floor sits in the first third: a gentle navy-to-blue ramp, so it reads as an even colour, not grain
+            Color[] stops = { t.Bg, Color.FromArgb(10, 30, 62), Color.FromArgb(18, 60, 118), t.Ice, t.Gold, Color.White };
+            double[] at = { 0, 0.22, 0.42, 0.66, 0.87, 1 };
             int[] p = new int[256];
             for (int i = 0; i < 256; i++)
             {
