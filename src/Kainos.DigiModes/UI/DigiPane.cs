@@ -37,7 +37,7 @@ namespace Kainos.DigiModes.UI
         private readonly ContextMenuStrip _bandMenu = new ContextMenuStrip();
         private string _statusText = "";
         private DateTime _statusAt;
-        private bool _syncing;
+        private bool _syncing, _built;
 
         public event Action PopToggled;
 
@@ -106,6 +106,8 @@ namespace Kainos.DigiModes.UI
             _timer = new Timer { Interval = 200 };
             _timer.Tick += (s, e) => tick();
             _timer.Start();
+            _built = true;
+            PerformLayout();
             refreshAll();
         }
 
@@ -120,7 +122,7 @@ namespace Kainos.DigiModes.UI
         protected override void OnLayout(LayoutEventArgs e)
         {
             base.OnLayout(e);
-            if (_ft8 == null) return;
+            if (!_built) return;        // adding the controls lays out before they all exist
             int pad = _t.S(4), bh = _t.S(24), x = pad, y = pad;
             Action<Control, int> place = (c, w) => { c.SetBounds(x, y, _t.S(w), bh); x += _t.S(w) + pad; };
             place(_ft8, 44); place(_ft4, 44); x += pad;

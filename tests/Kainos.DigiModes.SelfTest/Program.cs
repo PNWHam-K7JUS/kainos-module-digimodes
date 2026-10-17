@@ -28,6 +28,7 @@ namespace Kainos.DigiModes.SelfTest
             if (!ok) _fail++;
         }
 
+        [STAThread]
         private static int Main(string[] args)
         {
             string bin = args.Length > 0 ? args[0] : @"C:\WSJT\wsjtx\bin";
@@ -144,8 +145,48 @@ namespace Kainos.DigiModes.SelfTest
                 check(p.Count == 2 && p[0].Ap && p[0].Message == "K7JUS K1ABC FN42" && p[1].Snr == -3 && p[1].Freq == 456, "jt9 output parsed");
             }
 
+            // 7. the module in a stand-in Kainos: start, open the pane, run its timers, resize, close, stop
+            {
+                List<Exception> uiErrors = new List<Exception>();
+                System.Windows.Forms.Application.SetUnhandledExceptionMode(System.Windows.Forms.UnhandledExceptionMode.CatchException);
+                System.Windows.Forms.Application.ThreadException += (s, e) => uiErrors.Add(e.Exception);
+                string stage = "start";
+                try
+                {
+                    FakeHost host = new FakeHost(bin.EndsWith("decoder") ? Path.GetDirectoryName(bin) : bin, Path.Combine(work, "data"));
+                    host.Settings["decoder"] = bin;
+                    using (System.Windows.Forms.Form w = new System.Windows.Forms.Form { Width = 1200, Height = 300 })
+                    {
+                        host.Window = w;
+                        w.Show();
+                        DigiModesModule mod = new DigiModesModule();
+                        mod.Start(host);
+                        stage = "open";
+                        host.Menus[0].Click();
+                        pump(1200);
+                        stage = "resize";
+                        foreach (System.Drawing.Size sz in new[] { new System.Drawing.Size(640, 200), new System.Drawing.Size(1800, 420), new System.Drawing.Size(1100, 260) })
+                        { w.Size = sz; pump(200); }
+                        stage = "close";
+                        host.Menus[0].Click();
+                        pump(200);
+                        stage = "stop";
+                        mod.Stop();
+                        mod.Dispose();
+                    }
+                    check(uiErrors.Count == 0, "module UI runs in a stand-in Kainos" + (uiErrors.Count > 0 ? ": " + uiErrors[0] : ""));
+                }
+                catch (Exception ex) { check(false, "module UI (" + stage + "): " + ex); }
+            }
+
             System.Console.WriteLine(_fail == 0 ? "All passed" : _fail + " failed");
             return _fail == 0 ? 0 : 1;
+        }
+
+        private static void pump(int ms)
+        {
+            DateTime end = DateTime.UtcNow.AddMilliseconds(ms);
+            while (DateTime.UtcNow < end) { System.Windows.Forms.Application.DoEvents(); System.Threading.Thread.Sleep(10); }
         }
 
         private static double gauss(Random r)
