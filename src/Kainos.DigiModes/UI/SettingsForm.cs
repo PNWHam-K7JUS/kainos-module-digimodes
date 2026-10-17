@@ -20,8 +20,8 @@ namespace Kainos.DigiModes.UI
         private readonly IKainosHost _host;
         private readonly DigiEngine _e;
         private readonly NumericUpDown _level, _lead, _rxlat, _depth, _watchdog, _port;
-        private readonly CheckBox _stop73, _logPrompt, _udpOn, _udpAccept;
-        private readonly TextBox _decoder, _power, _op, _udpHost, _udpId;
+        private readonly CheckBox _stop73, _logPrompt, _udpOn, _udpAccept, _psk;
+        private readonly TextBox _decoder, _power, _op, _udpHost, _udpId, _pskAntenna;
 
         public SettingsForm(IKainosHost host, DigiEngine e)
         {
@@ -119,6 +119,12 @@ namespace Kainos.DigiModes.UI
             _udpId = text("Name sent", host.GetSetting("udpid", "Kainos"), 120, "How the other programs list this station. A few only accept \"WSJT-X\".");
             _udpAccept = check("Accept their requests (answer a station, halt, free text)", host.GetSetting("udpaccept", "1") == "1",
                 "Double-clicking a station in GridTracker (or JTAlert's callsign) answers it here, as double-clicking a decode does.");
+            y += 6;
+            heading("PSK Reporter");
+            _psk = check("Report the stations I hear to pskreporter.info", host.GetSetting("psk", "0") == "1",
+                "Every 5 minutes, the stations decoded here (callsign, grid, frequency, SNR) are sent to PSK Reporter with your callsign and grid,\r\n" +
+                "so you and others can see on its map where signals are heard. Off by default: it publishes your callsign and location.");
+            _pskAntenna = text("Antenna (optional)", host.GetSetting("pskantenna", ""), 160, "Shown with your reports on PSK Reporter, e.g. \"EFHW 40 m\".");
             int rightBottom = y;
 
             y = Math.Max(leftBottom, rightBottom) + 8;
@@ -156,6 +162,8 @@ namespace Kainos.DigiModes.UI
             _host.SetSetting("udpport", ((int)_port.Value).ToString());
             _host.SetSetting("udpid", _udpId.Text.Trim());
             _host.SetSetting("udpaccept", _udpAccept.Checked ? "1" : "0");
+            _host.SetSetting("psk", _psk.Checked ? "1" : "0");
+            _host.SetSetting("pskantenna", _pskAntenna.Text.Trim());
             DigiModesModule.FindDecoder(_host, _e);
         }
     }

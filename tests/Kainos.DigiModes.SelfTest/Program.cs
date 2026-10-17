@@ -146,6 +146,42 @@ namespace Kainos.DigiModes.SelfTest
                 check(p.Count == 2 && p[0].Ap && p[0].Message == "K7JUS K1ABC FN42" && p[1].Snr == -3 && p[1].Freq == 456, "jt9 output parsed");
             }
 
+            // 11. PSK Reporter: who a decode reports, and the IPFIX packet (read back field by field; nothing is sent)
+            {
+                Func<string, DecodeLine> dl = m => new DecodeLine { Message = m, Snr = -7, Freq = 1234, Mode = FtxMode.FT8, SlotUtc = new DateTime(2026, 10, 16, 12, 0, 15, DateTimeKind.Utc) };
+                PskSpot a = PskReporter.SpotOf(dl("CQ DX VK2XYZ QF56"), 14074000, "K7JUS"), b = PskReporter.SpotOf(dl("K7JUS W9XYZ RR73"), 14074000, "K7JUS");
+                PskSpot c = PskReporter.SpotOf(dl("W9XYZ K7JUS R-07"), 14074000, "K7JUS"), h = PskReporter.SpotOf(dl("K1ABC <KH1/KH7Z> -11"), 14074000, "K7JUS");
+                check(a != null && a.Call == "VK2XYZ" && a.Grid == "QF56" && a.Hz == 14075234 && b != null && b.Call == "W9XYZ" && b.Grid == "" && c == null && h == null,
+                    "PSK Reporter: senders and grids from decodes (RR73 isn't a grid; not my own call, not hashed calls)");
+
+                PskReporter psk = new PskReporter { MyCall = "K7JUS", MyGrid = "CN87", Software = "Kainos test" };
+                List<byte[]> pk = psk.Packets(new List<PskSpot> { a, b }, new DateTime(2026, 10, 16, 12, 5, 0, DateTimeKind.Utc));
+                byte[] p0 = pk[0];
+                Func<int, int, ulong> be = (o, n) => { ulong v = 0; for (int i = 0; i < n; i++) v = (v << 8) | p0[o + i]; return v; };
+                bool ok = pk.Count == 1 && be(0, 2) == 10 && (int)be(2, 2) == p0.Length;
+                // walk the sets: options template (3), template (2), receiver data (0x50e2), sender data (0x50e3); each padded to 4
+                List<int> ids = new List<int>();
+                int pos = 16, senderAt = -1;
+                while (ok && pos + 4 <= p0.Length)
+                {
+                    int id = (int)be(pos, 2), len = (int)be(pos + 2, 2);
+                    if (len < 4 || len % 4 != 0 || pos + len > p0.Length) { ok = false; break; }
+                    ids.Add(id);
+                    if (id == 0x50e3) senderAt = pos + 4;
+                    pos += len;
+                }
+                ok = ok && pos == p0.Length && ids.SequenceEqual(new[] { 3, 2, 0x50e2, 0x50e3 }) && senderAt > 0;
+                // the first sender record: callsign, 5-byte frequency, SNR, mode, grid, source, time
+                if (ok)
+                {
+                    int q2 = senderAt;
+                    Func<string> s = () => { int n = p0[q2]; string v = System.Text.Encoding.UTF8.GetString(p0, q2 + 1, n); q2 += 1 + n; return v; };
+                    string call = s(); ulong hz = be(q2, 5); q2 += 5; int snr = (sbyte)p0[q2++]; string mode = s(), grid = s(); int src = p0[q2++]; ulong t = be(q2, 4);
+                    ok = call == "VK2XYZ" && hz == 14075234 && snr == -7 && mode == "FT8" && grid == "QF56" && src == 1 && t == 1792152015;
+                }
+                check(ok, "PSK Reporter packet: IPFIX header, templates and records read back (sets " + string.Join(",", ids.Select(i => i.ToString("x"))) + ")");
+            }
+
             // 10. the waterfall's FFT: a 1000 Hz tone peaks in its bin (1000 * 2048 / 12000 = 170.7)
             {
                 SpectrumMaker sm = new SpectrumMaker();

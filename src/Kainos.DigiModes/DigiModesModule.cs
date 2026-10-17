@@ -50,13 +50,32 @@ namespace Kainos.DigiModes
             _menu = host.AddMenuItem("FT8 / FT4", "FT8 and FT4 (the Digital Modes module): open / close.", () => { if (_pane.IsOpen) close(); else open(); });
             // WSJT-X's UDP messages, for GridTracker, JTAlert and the loggers (Net/UdpBridge.cs)
             _udp = new Net.UdpBridge(host, _engine, _view, ModuleVersion);
-            _view.SettingsChanged += () => _udp.Apply();
+            // PSK Reporter (off unless turned on in Settings)
+            _psk = new Net.PskReporter { Software = "Kainos Digital Modes " + ModuleVersion };
+            _psk.Status += s => host.Log(s);
+            _engine.Decoded += (slot, mode, list) =>
+            {
+                if (!_psk.Running) return;
+                _psk.MyCall = host.Callsign;
+                _psk.MyGrid = host.Grid;
+                long dial = (long)host.Radio.VfoHz(_engine.Rx);
+                foreach (Decode.DecodeLine d in list) _psk.Add(d, dial);
+            };
+            _view.SettingsChanged += () => { _udp.Apply(); applyPsk(); };
             if (host.GetSetting("open", "0") == "1") open();
         }
 
         internal static string ModuleVersion { get { System.Version v = typeof(DigiModesModule).Assembly.GetName().Version; return v.Major + "." + v.Minor + "." + v.Build; } }
 
         private Net.UdpBridge _udp;
+        private Net.PskReporter _psk;
+
+        private void applyPsk()
+        {
+            _psk.Antenna = _host.GetSetting("pskantenna", "");
+            bool on = _host.GetSetting("psk", "0") == "1" && _pane.IsOpen;
+            if (on) _psk.Start(); else _psk.Stop();
+        }
 
         private void open()
         {
@@ -64,6 +83,7 @@ namespace Kainos.DigiModes
             _engine.Relisten();
             _engine.Start();
             _udp.Apply();
+            applyPsk();
             _menu.Checked = true;
             _host.SetSetting("open", "1");
         }
@@ -73,6 +93,7 @@ namespace Kainos.DigiModes
             _engine.Stop();
             _udp.Dispose();
             _pane.Close();
+            applyPsk();         // sends what's gathered, then stops
             _host.SetMarkers(0, null);
             _host.SetMarkers(1, null);
             _menu.Checked = false;
@@ -83,6 +104,7 @@ namespace Kainos.DigiModes
         {
             if (_engine != null) _engine.Stop();
             if (_udp != null) _udp.Dispose();
+            if (_psk != null) _psk.Stop();
         }
 
         public void Dispose()

@@ -8,6 +8,8 @@ A module for [Kainos](https://github.com/PNWHam-K7JUS/Kainos), the Hermes Lite 2
 - **Band menu**: tunes to the band's FT8 or FT4 frequency and sets DIGU.
 - **Log QSO**: when a QSO completes, a window opens with its details filled in. You can check or add to them before logging, or turn the window off to log straight away. Each QSO is added to `kainos-digimodes.adi` (Settings, "Open the log folder").
 - **Works with GridTracker, JTAlert, N1MM+, Log4OM, HRD, DXKeeper and others.** The module sends WSJT-X's UDP messages to 127.0.0.1:2237 by default: decodes, status, and logged QSOs (as a QSO message and as ADIF). It also takes their requests: double-click a station in GridTracker to answer it, halt TX, send free text, or replay recent decodes. Set those programs up as you would for WSJT-X.
+- **Waterfall** of the 0 to 3000 Hz audio, with the last period's stations labelled along its top. It takes about a third of the pane, so it grows when you drag the pane taller.
+- **PSK Reporter** (off by default; Settings): every 5 minutes the stations you decode are reported to pskreporter.info, in the same format WSJT-X uses.
 - **Tx watchdog** and **Halt Tx**. Transmitting also stops if the radio is un-keyed elsewhere.
 
 ## Installing
