@@ -21,7 +21,8 @@ namespace Kainos.DigiModes.UI
         private readonly DigiEngine _e;
         private readonly NumericUpDown _level, _lead, _rxlat, _depth, _watchdog, _port;
         private readonly CheckBox _stop73, _logPrompt, _udpOn, _udpAccept, _psk, _sndMe, _sndDx, _crisp;
-        private readonly TextBox _decoder, _power, _op, _udpHost, _udpId, _pskAntenna, _workLog;
+        private readonly TextBox _decoder, _power, _op, _udpHost, _udpId, _pskAntenna, _workLog, _exchange;
+        private readonly ComboBox _contest;
 
         public SettingsForm(IKainosHost host, DigiEngine e)
         {
@@ -144,6 +145,34 @@ namespace Kainos.DigiModes.UI
                 "Every 5 minutes, the stations decoded here (callsign, grid, frequency, SNR) are sent to PSK Reporter with your callsign and grid,\r\n" +
                 "so you and others can see on its map where signals are heard. Off by default: it publishes your callsign and location.");
             _pskAntenna = text("Antenna (optional)", host.GetSetting("pskantenna", ""), 160, "Shown with your reports on PSK Reporter, e.g. \"EFHW 40 m\".");
+            y += 6;
+            heading("Contest");
+            Controls.Add(new Label { Text = "Activity", Location = new Point(x0, y + 3), AutoSize = true });
+            _contest = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(x0 + 150, y), Width = 180 };
+            foreach (Qso.Contest c in new[] { Qso.Contest.None, Qso.Contest.FieldDay, Qso.Contest.RttyRoundup, Qso.Contest.NaVhf, Qso.Contest.WwDigi }) _contest.Items.Add(Qso.QsoEngine.Name(c));
+            int ci;
+            int.TryParse(host.GetSetting("contest", "0"), out ci);
+            _contest.SelectedItem = Qso.QsoEngine.Name((Qso.Contest)ci);
+            if (_contest.SelectedIndex < 0) _contest.SelectedIndex = 0;
+            tips.SetToolTip(_contest, "WSJT-X's contest messages: CQ FD / CQ RU / CQ TEST / CQ WW, your exchange in place of the signal report,\r\n" +
+                                      "and automatic sequencing to RR73. When you call CQ, each completed QSO goes straight back to CQ.");
+            Controls.Add(_contest);
+            y += 30;
+            _exchange = text("Your exchange", host.GetSetting("exchange", ""), 120, "");
+            _exchange.CharacterCasing = CharacterCasing.Upper;
+            Label exHint = new Label { Location = new Point(x0, y), Size = new Size(360, 30), ForeColor = SystemColors.GrayText };
+            Controls.Add(exHint);
+            Action hint = () =>
+            {
+                string n = (string)_contest.SelectedItem;
+                _exchange.Enabled = n == Qso.QsoEngine.Name(Qso.Contest.FieldDay) || n == Qso.QsoEngine.Name(Qso.Contest.RttyRoundup);
+                exHint.Text = n == Qso.QsoEngine.Name(Qso.Contest.FieldDay) ? "Field Day: your class and section, e.g. 1D WWA" :
+                              n == Qso.QsoEngine.Name(Qso.Contest.RttyRoundup) ? "Roundup: your state or province (e.g. WA); empty outside the US and Canada for serial numbers" :
+                              n == Qso.QsoEngine.Name(Qso.Contest.None) ? "" : "The exchange is your grid square";
+            };
+            _contest.SelectedIndexChanged += (s, a) => hint();
+            hint();
+            y += 30;
             int rightBottom = y;
 
             y = Math.Max(leftBottom, rightBottom) + 8;
@@ -182,6 +211,11 @@ namespace Kainos.DigiModes.UI
             _host.SetSetting("udpid", _udpId.Text.Trim());
             _host.SetSetting("udpaccept", _udpAccept.Checked ? "1" : "0");
             _host.SetSetting("worklog", _workLog.Text.Trim());
+            Qso.Contest c = Qso.Contest.None;
+            foreach (Qso.Contest k in Enum.GetValues(typeof(Qso.Contest))) if (Qso.QsoEngine.Name(k) == (string)_contest.SelectedItem) c = k;
+            _host.SetSetting("contest", ((int)c).ToString());
+            _host.SetSetting("exchange", _exchange.Text.Trim());
+            lock (_e.Qso) { _e.Qso.Activity = c; _e.Qso.MyExchange = _exchange.Text.Trim(); }
             _host.SetSetting("sndme", _sndMe.Checked ? "1" : "0");
             _host.SetSetting("snddxcc", _sndDx.Checked ? "1" : "0");
             _host.SetSetting("crispwf", _crisp.Checked ? "1" : "0");

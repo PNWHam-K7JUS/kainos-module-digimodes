@@ -7,7 +7,9 @@ This file is part of the Kainos Digital Modes module. Copyright (C) 2026 Justin 
 
 using System;
 using System.Globalization;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using Kainos.DigiModes.Ftx;
 
@@ -49,8 +51,28 @@ namespace Kainos.DigiModes.Qso
             f(sb, "OPERATOR", q.Operator);
             f(sb, "STATION_CALLSIGN", myCall);
             f(sb, "MY_GRIDSQUARE", myGrid);
+            contest(sb, q);
             sb.Append("<EOR>");
             return sb.ToString();
+        }
+
+        // a contest QSO: the contest, both exchanges, and the received one in its own ADIF fields
+        private static void contest(StringBuilder sb, QsoRecord q)
+        {
+            if (q.Contest == Contest.None) return;
+            string id = q.Contest == Contest.FieldDay ? "ARRL-FD" : q.Contest == Contest.RttyRoundup ? "ARRL-RTTY" :
+                        q.Contest == Contest.WwDigi ? "WW-DIGI" : "ARRL-VHF";
+            f(sb, "CONTEST_ID", id);
+            f(sb, "STX_STRING", q.ExchSent);
+            f(sb, "SRX_STRING", q.ExchRcvd);
+            string[] r = (q.ExchRcvd ?? "").Split(' ');
+            if (q.Contest == Contest.FieldDay && r.Length == 2) { f(sb, "CLASS", r[0]); f(sb, "ARRL_SECT", r[1]); }
+            if (q.Contest == Contest.RttyRoundup && r.Length == 2)
+            {
+                int serial;
+                if (int.TryParse(r[1], out serial)) f(sb, "SRX", serial.ToString(CultureInfo.InvariantCulture));
+                else f(sb, "STATE", r[1]);
+            }
         }
 
         private static void f(StringBuilder sb, string name, string v)
@@ -88,5 +110,63 @@ namespace Kainos.DigiModes.Qso
         }
 
         public static string AdifBand(double hz) { Band b = Of(hz); return b != null ? b.Name.ToUpperInvariant() : ""; }
+
+        // ---- the Band menu: editable (Settings > Band frequencies). The band edges above stay fixed (they say which
+        // band a frequency is in); the menu is a list of name, FT8 and FT4 dial frequencies, any of them the user's ----
+
+        public class Entry { public string Name; public double Ft8, Ft4; }
+
+        public static List<Entry> Menu = Defaults();
+
+        public static List<Entry> Defaults() { return All.Select(b => new Entry { Name = b.Name, Ft8 = b.Ft8, Ft4 = b.Ft4 }).ToList(); }
+
+        // one line each: name, FT8 MHz, FT4 MHz ("-" or nothing for none), e.g. "40m 7.074 7.0475" or "DXped 14.090 -"
+        public static string Format(IEnumerable<Entry> list)
+        {
+            Func<double, string> mhz = hz => hz > 0 ? (hz / 1e6).ToString("0.0#####", CultureInfo.InvariantCulture) : "-";
+            return string.Join("\r\n", list.Select(e => e.Name + " " + mhz(e.Ft8) + " " + mhz(e.Ft4)));
+        }
+
+        // null and the first line it couldn't read when something's wrong
+        public static List<Entry> Parse(string text, out string problem)
+        {
+            problem = null;
+            List<Entry> res = new List<Entry>();
+            int n = 0;
+            foreach (string raw in (text ?? "").Replace("\r", "").Split('\n'))
+            {
+                n++;
+                string line = raw.Trim();
+                if (line.Length == 0 || line.StartsWith("#")) continue;
+                string[] p = line.Split(new[] { ' ', '\t', ',' }, StringSplitOptions.RemoveEmptyEntries);
+                double f8, f4 = 0;
+                if (p.Length < 2 || !mhzOk(p[1], out f8) || (p.Length >= 3 && !mhzOk(p[2], out f4)) || f8 + f4 <= 0)
+                {
+                    problem = "Line " + n + " (\"" + line + "\"): expected a name, then the FT8 and FT4 frequencies in MHz (\"-\" for none)";
+                    return null;
+                }
+                res.Add(new Entry { Name = p[0], Ft8 = f8, Ft4 = f4 });
+            }
+            if (res.Count == 0) { problem = "The list is empty"; return null; }
+            return res;
+        }
+
+        private static bool mhzOk(string s, out double hz)
+        {
+            hz = 0;
+            if (s == "-") return true;
+            double mhz;
+            if (!double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out mhz) || mhz < 0.1 || mhz > 1300) return false;
+            hz = Math.Round(mhz * 1e6);
+            return true;
+        }
+
+        // from the saved setting ("" = the defaults)
+        public static void Load(string saved)
+        {
+            string why;
+            List<Entry> l = string.IsNullOrWhiteSpace(saved) ? null : Parse(saved, out why);
+            Menu = l ?? Defaults();
+        }
     }
 }

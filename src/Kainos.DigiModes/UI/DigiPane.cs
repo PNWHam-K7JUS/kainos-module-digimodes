@@ -252,7 +252,7 @@ namespace Kainos.DigiModes.UI
         {
             _bandMenu.Items.Clear();
             int rx = _e.Rx;
-            foreach (Bands.Band b in Bands.All)
+            foreach (Bands.Entry b in Bands.Menu)
             {
                 double f = _e.Mode == FtxMode.FT8 ? b.Ft8 : b.Ft4;
                 if (f <= 0) continue;
@@ -265,6 +265,22 @@ namespace Kainos.DigiModes.UI
                     refreshAll();
                 };
                 _bandMenu.Items.Add(it);
+            }
+            _bandMenu.Items.Add(new ToolStripSeparator());
+            ToolStripMenuItem edit = new ToolStripMenuItem("Edit band frequencies...");
+            edit.Click += (s, e) => editBands();
+            _bandMenu.Items.Add(edit);
+        }
+
+        private void editBands()
+        {
+            using (BandEditForm f = new BandEditForm(Bands.Format(Bands.Menu)))
+            {
+                _t.Style(f);
+                if (f.ShowDialog(FindForm()) != DialogResult.OK) return;
+                Bands.Menu = f.Result;
+                bool isDefault = Bands.Format(f.Result) == Bands.Format(Bands.Defaults());
+                _host.SetSetting("bands", isDefault ? "" : Bands.Format(f.Result));
             }
         }
 
@@ -345,6 +361,7 @@ namespace Kainos.DigiModes.UI
                 string rec = AdifLog.Append(path, q, mode, _e.Qso.MyCall, _e.Qso.MyGrid);
                 status("Logged " + q.Call + " (" + q.RstSent + " / " + q.RstRcvd + ") to kainos-digimodes.adi");
                 Worked.Add(q.Call, q.Grid, Bands.AdifBand(q.DialHz));
+                if (q.Contest == Contest.RttyRoundup) _host.SetSetting("serial", _e.Qso.Serial.ToString());
                 QsoCommitted?.Invoke(q, mode, rec);
             }
             catch (Exception ex) { status("Couldn't write the log: " + ex.Message); }
@@ -438,7 +455,8 @@ namespace Kainos.DigiModes.UI
             if (_statusText.Length > 0 && (now - _statusAt).TotalSeconds > 20) { _statusText = ""; _status.Text = ""; }
             if (_statusText.Length == 0)
                 _status.Text = !_e.Decoder.Available ? "Decoder (jt9.exe) not found: see Settings" :
-                               !_e.Listening ? "Not listening" : "";
+                               !_e.Listening ? "Not listening" :
+                               _e.Qso.Activity != Contest.None ? "Contest: " + QsoEngine.Name(_e.Qso.Activity) + (_e.Qso.MyExch.Length > 0 ? " (sending " + _e.Qso.MyExch + ")" : "") : "";
             // the markers on the panadapter: RX (gold) and TX (red) at their audio frequencies above the VFO
             int rx = _e.Rx;
             string m = _host.Radio.Mode(rx);
@@ -510,6 +528,10 @@ namespace Kainos.DigiModes.UI
             _e.TxLeadMs = Math.Max(0, Math.Min(1000, gd("lead", 0)));
             _e.RxLatencyMs = Math.Max(0, Math.Min(1000, gd("rxlat", 0)));
             _e.Decoder.Depth = Math.Max(1, Math.Min(3, gi("depth", 3)));
+            Bands.Load(g("bands", ""));
+            _e.Qso.Activity = (Contest)gi("contest", 0);
+            _e.Qso.MyExchange = g("exchange", "");
+            _e.Qso.Serial = Math.Max(1, gi("serial", 1));
             applyFilter();
         }
 

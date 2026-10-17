@@ -1,4 +1,4 @@
-/*  WsjtxUdp.cs
+﻿/*  WsjtxUdp.cs
 
 WSJT-X's UDP messages (its NetworkMessage protocol), so the programs that work with WSJT-X work with Kainos too:
 GridTracker, JTAlert, N1MM+, Log4OM, HRD, DXKeeper and others. Kainos sends the heartbeat, status, each decode
@@ -85,6 +85,7 @@ namespace Kainos.DigiModes.Net
         public string Mode = "FT8", DxCall = "", Report = "", TxMode = "FT8", DeCall = "", DeGrid = "", DxGrid = "", TxMessage = "";
         public bool TxEnabled, Transmitting, Decoding, TxWatchdog;
         public uint RxDf, TxDf, PeriodS = 15;
+        public byte Special;
     }
 
     internal class WsjtxReply
@@ -213,7 +214,7 @@ namespace Kainos.DigiModes.Net
             w.Bool(s.TxWatchdog);
             w.Utf8("");             // sub-mode
             w.Bool(false);          // fast mode
-            w.U8(0);                // special operation: none
+            w.U8(s.Special);         // special operation (0 none, 1 NA VHF, 3 Field Day, 4 RTTY Roundup, 5 WW Digi)
             w.U32(0xffffffff);      // frequency tolerance: not used
             w.U32(s.PeriodS);
             w.Utf8("Kainos");       // configuration name
@@ -245,7 +246,8 @@ namespace Kainos.DigiModes.Net
         }
 
         public void QsoLogged(DateTime off, string dxCall, string dxGrid, ulong txHz, string mode, string rptSent, string rptRcvd,
-                              string txPower, string comments, string name, DateTime on, string opCall, string myCall, string myGrid)
+                              string txPower, string comments, string name, DateTime on, string opCall, string myCall, string myGrid,
+                              string exchSent = "", string exchRcvd = "")
         {
             QWriter w = header(WsjtxType.QsoLogged);
             w.QDateTime(off);
@@ -262,8 +264,8 @@ namespace Kainos.DigiModes.Net
             w.Utf8(opCall);
             w.Utf8(myCall);
             w.Utf8(myGrid);
-            w.Utf8("");             // exchange sent
-            w.Utf8("");             // exchange received
+            w.Utf8(exchSent ?? "");
+            w.Utf8(exchRcvd ?? "");
             w.Utf8("");             // ADIF propagation mode
             send(w);
         }

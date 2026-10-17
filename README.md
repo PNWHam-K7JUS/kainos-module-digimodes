@@ -15,6 +15,8 @@ A module for [Kainos](https://github.com/PNWHam-K7JUS/Kainos), the Hermes Lite 2
 - **Clock check**: the stations' median DT is shown beside the clock. If it's 0.6 s or more off, you're told to synchronise the PC's clock.
 - **ALL.TXT**: every decode and transmission is written to the log folder in WSJT-X's format.
 - **Sounds** when someone calls you, and optionally when a new DXCC entity calls CQ.
+- **Contests** (Settings > Contest): ARRL Field Day, ARRL RTTY Roundup (serial numbers outside the US and Canada), NA VHF and WW Digi. These use WSJT-X's messages (CQ FD / RU / TEST / WW), sent with your exchange in place of the report, and auto-sequence to RR73. When you call CQ, each completed QSO goes straight back to CQ. The exchanges are logged in the ADIF contest fields and sent over UDP.
+- **Band frequencies** are editable (Band > Edit band frequencies...): add a DXpedition or 60 m channel, or change any default.
 - **Tx watchdog** and **Halt Tx**. Transmitting also stops if the radio is un-keyed elsewhere.
 
 ## Installing

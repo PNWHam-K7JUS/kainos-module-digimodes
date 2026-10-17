@@ -151,6 +151,83 @@ namespace Kainos.DigiModes.SelfTest
                 check(p.Count == 2 && p[0].Ap && p[0].Message == "K7JUS K1ABC FN42" && p[1].Snr == -3 && p[1].Freq == 456, "jt9 output parsed");
             }
 
+            // 14. the Band menu list: parse, format, mistakes caught
+            {
+                string why;
+                List<Bands.Entry> l = Bands.Parse("40m 7.074 7.0475\r\n# a comment\r\nDXped 14.090 -\r\n60m 5.357", out why);
+                bool ok = l != null && l.Count == 3 && l[1].Name == "DXped" && l[1].Ft8 == 14090000 && l[1].Ft4 == 0 && l[2].Ft4 == 0 && l[0].Ft4 == 7047500;
+                string badWhy;
+                List<Bands.Entry> bad = Bands.Parse("40m 7.074\r\n20m fourteen", out badWhy);
+                List<Bands.Entry> round = Bands.Parse(Bands.Format(Bands.Defaults()), out why);
+                check(ok && bad == null && badWhy != null && badWhy.StartsWith("Line 2") && round != null && Bands.Format(round) == Bands.Format(Bands.Defaults()),
+                    "band frequencies: parse, mistakes caught (" + badWhy + "), defaults round-trip");
+            }
+
+            // 15. contests: every message the sequencer makes packs exactly (ft8code), and each flow runs to the log
+            {
+                Func<string, int, DecodeLine> d = (m, s) => new DecodeLine { Message = m, Snr = s, Freq = 1000, Mode = FtxMode.FT8 };
+                List<string> problems = new List<string>();
+                Action<QsoEngine> packs = q =>
+                {
+                    foreach (int n in new[] { 1, 2, 3, 6 })
+                    {
+                        string m = q.Message(n), why;
+                        PackedMessage pm = Pack77.Pack(ft8code, m, out why);
+                        if (pm == null || pm.Decoded != m) problems.Add(m + " -> " + (pm != null ? pm.Decoded : why));
+                    }
+                };
+
+                // Field Day: I answer W9XYZ's CQ; he sends R and his; I send RR73 and it's logged
+                QsoEngine fd = new QsoEngine { MyCall = "K7JUS", MyGrid = "CN87", Activity = Contest.FieldDay, MyExchange = "1D WWA" };
+                List<QsoRecord> logs = new List<QsoRecord>();
+                fd.Logged += r => logs.Add(r);
+                fd.Answer(d("CQ FD W9XYZ EN37", -8));
+                string fd1 = fd.NextMessage;
+                fd.Sequence(new[] { d("K7JUS W9XYZ R 6A WI", -7) }, null);
+                string fd3 = fd.NextMessage;
+                fd.Sent(fd3);
+                bool fdOk = fd1 == "W9XYZ K7JUS 1D WWA" && fd3 == "W9XYZ K7JUS RR73" && logs.Count == 1 && logs[0].ExchRcvd == "6A WI" && logs[0].ExchSent == "1D WWA" && fd.Done;
+                string adif = AdifLog.Record(logs.Count > 0 ? logs[0] : new QsoRecord(), FtxMode.FT8, "K7JUS", "CN87");
+                fdOk &= adif.Contains("<CONTEST_ID:7>ARRL-FD") && adif.Contains("<CLASS:2>6A") && adif.Contains("<ARRL_SECT:2>WI") && adif.Contains("<STX_STRING:6>1D WWA");
+                packs(fd);
+
+                // Field Day run: I call CQ FD; W9XYZ answers with his; I send R and mine; his RR73 logs it and I'm back to CQ
+                QsoEngine run = new QsoEngine { MyCall = "K7JUS", MyGrid = "CN87", Activity = Contest.FieldDay, MyExchange = "1D WWA", Next = 6 };
+                List<QsoRecord> runLog = new List<QsoRecord>();
+                run.Logged += r => runLog.Add(r);
+                string cq = run.NextMessage;
+                run.Sequence(new[] { d("K7JUS W9XYZ 6A WI", -3) }, cq);
+                string r2 = run.NextMessage;
+                run.Sequence(new[] { d("K7JUS W9XYZ RR73", -3) }, r2);
+                bool runOk = cq == "CQ FD K7JUS CN87" && r2 == "W9XYZ K7JUS R 1D WWA" && runLog.Count == 1 && runLog[0].Call == "W9XYZ" && run.Next == 6 && !run.Done && run.HisCall == "";
+
+                // RTTY Roundup outside the US: serial numbers, counting up
+                QsoEngine ru = new QsoEngine { MyCall = "DL1ABC", MyGrid = "JO62", Activity = Contest.RttyRoundup, MyExchange = "", Serial = 12 };
+                List<QsoRecord> ruLog = new List<QsoRecord>();
+                ru.Logged += r => ruLog.Add(r);
+                ru.Answer(d("CQ RU K7JUS CN87", -2));
+                string ru1 = ru.NextMessage;
+                ru.Sequence(new[] { d("DL1ABC K7JUS R 579 WA", -2) }, null);
+                ru.Sent(ru.NextMessage);
+                bool ruOk = ru1 == "K7JUS DL1ABC 599 0012" && ruLog.Count == 1 && ruLog[0].RstRcvd == "579" && ruLog[0].ExchRcvd == "579 WA" && ru.Serial == 13;
+                packs(ru);
+
+                // NA VHF: grids
+                QsoEngine vhf = new QsoEngine { MyCall = "K7JUS", MyGrid = "CN87", Activity = Contest.NaVhf };
+                vhf.Answer(d("CQ TEST W9XYZ EN37", -10));
+                string v1 = vhf.NextMessage;
+                vhf.Sequence(new[] { d("K7JUS W9XYZ R EN37", -10) }, null);
+                bool vhfOk = v1 == "W9XYZ K7JUS CN87" && vhf.NextMessage == "W9XYZ K7JUS RR73" && vhf.HisGrid == "EN37";
+                packs(vhf);
+                packs(new QsoEngine { MyCall = "K7JUS", MyGrid = "CN87", HisCall = "W9XYZ", Activity = Contest.WwDigi });
+
+                check(fdOk, "Field Day: answer a CQ, his R and exchange, RR73, logged with CLASS / ARRL_SECT");
+                check(runOk, "Field Day run: CQ FD, his exchange, R and mine, his RR73 logs it and it's back to CQ");
+                check(ruOk, "RTTY Roundup: serial numbers outside the US and Canada (" + ru1 + "), counting up");
+                check(vhfOk, "NA VHF: grids as the exchange");
+                check(problems.Count == 0, "every contest message packs exactly" + (problems.Count > 0 ? ": " + string.Join("; ", problems) : ""));
+            }
+
             // 13. band activity filters, and ALL.TXT's line format
             {
                 FakeHost th = new FakeHost(bin, Path.Combine(work, "filter"));

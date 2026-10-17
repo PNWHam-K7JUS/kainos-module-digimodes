@@ -1,4 +1,4 @@
-/*  UdpBridge.cs
+﻿/*  UdpBridge.cs
 
 Connects the FT8 / FT4 station to WSJT-X's UDP messages (WsjtxUdp.cs): what happens here goes out, and what
 GridTracker, JTAlert and the loggers ask for comes in.
@@ -55,7 +55,7 @@ namespace Kainos.DigiModes.Net
             {
                 if (!_udp.Running) return;
                 _udp.QsoLogged(q.Off, q.Call, q.Grid, (ulong)Math.Max(0, q.DialHz + q.AudioHz), mode.ToString(), q.RstSent, q.RstRcvd,
-                               q.TxPower, q.Comments, q.Name, q.On, q.Operator, _e.Qso.MyCall, _e.Qso.MyGrid);
+                               q.TxPower, q.Comments, q.Name, q.On, q.Operator, _e.Qso.MyCall, _e.Qso.MyGrid, q.ExchSent, q.ExchRcvd);
                 _udp.LoggedAdif(rec);
             };
 
@@ -133,6 +133,7 @@ namespace Kainos.DigiModes.Net
                         TxEnabled = _e.TxEnabled, Transmitting = _e.Transmitting, Decoding = _e.Decoding,
                         RxDf = (uint)_e.RxFreq, TxDf = (uint)_e.TxFreq,
                         PeriodS = (uint)Math.Round(FtxModes.Period(_e.Mode)),
+                        Special = (byte)_e.Qso.Activity,
                         TxMessage = _e.Qso.NextMessage,
                     };
                 }
