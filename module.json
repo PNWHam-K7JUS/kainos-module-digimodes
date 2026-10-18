@@ -4,7 +4,7 @@
   "description": "FT8, FT4, JT65, JT9 and WSPR inside Kainos: band activity, automatic QSO sequencing and an ADIF log, in the Kainos look. Decoding by WSJT-X's jt9 (included).",
   "version": "0.9.0",
   "api": 1,
-  "minKainos": "",
+  "minKainos": "1.0.11",
   "entry": "Kainos.DigiModes.dll",
   "author": "Justin Cron K7JUS",
   "license": "GPL-3.0-or-later",
