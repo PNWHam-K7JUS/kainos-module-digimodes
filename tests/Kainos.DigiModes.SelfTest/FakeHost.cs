@@ -63,7 +63,11 @@ namespace Kainos.DigiModes.SelfTest
         public void SetMode(int rx, string mode) { ModeName = mode; }
         public void SetMox(bool on) { Mox = on; }
 
-        public bool AcquireRx(int rx, Action released, out string problem) { problem = null; return true; }
+        // the stand-in for another digital mode (SSTV, RTTY...) taking the receiver's audio
+        private Action _released;
+        public int Acquires;
+        public void TakeAway() { Action a = _released; _released = null; if (a != null) a(); }
+        public bool AcquireRx(int rx, Action released, out string problem) { problem = null; _released = released; Acquires++; return true; }
         public void ReleaseRx() { }
         public int RxRate { get { return 48000; } }
         public int ReadRx(float[] dst, int max) { return Air != null && Clock != null ? Air.Read(dst, max, Clock()) : 0; }

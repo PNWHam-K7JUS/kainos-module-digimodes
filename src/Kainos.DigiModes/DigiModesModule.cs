@@ -48,6 +48,13 @@ namespace Kainos.DigiModes
             _pane = host.CreatePane("Kainos FT8 / FT4", _view);
             _pane.Closed += (s, e) => close();
             _view.PopToggled += () => _pane.Popped = !_pane.Popped;
+            // one digital mode at a time: when another (SSTV, RTTY, CW...) takes the receiver's audio, this one closes
+            _engine.RxLost += () => host.BeginInvoke(() =>
+            {
+                if (!_pane.IsOpen) return;
+                host.Log("another digital mode took the receiver's audio: closing");
+                close();
+            });
             _menu = host.AddMenuItem("FT8 / FT4", "FT8 and FT4 (the Digital Modes module): open / close.", () => { if (_pane.IsOpen) close(); else open(); });
             // WSJT-X's UDP messages, for GridTracker, JTAlert and the loggers (Net/UdpBridge.cs)
             _udp = new Net.UdpBridge(host, _engine, _view, ModuleVersion);

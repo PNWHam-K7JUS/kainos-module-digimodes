@@ -273,6 +273,18 @@ namespace Kainos.DigiModes.SelfTest
                 h2.Sequence(new[] { d("K7JUS KH7Z RR73", -8, 360) }, null);
                 plain &= h2.Done;
 
+                // one digital mode at a time: once something else takes the receiver's audio, the engine leaves it alone
+                {
+                    FakeHost th = new FakeHost(bin, Path.Combine(work, "tap"));
+                    DigiEngine te = new DigiEngine(th);
+                    bool lost = false;
+                    te.RxLost += () => lost = true;
+                    te.Step(); th.TakeAway(); te.Step(); te.Step();
+                    int afterLoss = th.Acquires;
+                    te.Relisten(); te.Step();
+                    check(lost && afterLoss == 1 && th.Acquires == 2, "audio taken by another mode: not taken back until reopened (acquired " + afterLoss + " then " + th.Acquires + ")");
+                }
+
                 // frequencies: calls at 1000 Hz or above; R+report where Fox called, then 300 Hz away, then back
                 DigiEngine he = new DigiEngine(new FakeHost(bin, Path.Combine(work, "hound"))) { TxFreq = 800 };
                 he.Qso.Activity = Contest.Hound; he.Qso.HisCall = "KH1/KH7Z"; he.Qso.Next = 1;

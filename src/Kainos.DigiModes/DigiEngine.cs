@@ -67,6 +67,7 @@ namespace Kainos.DigiModes
         private DateTime _lastActivity = DateTime.UtcNow;
         private string _lastSent;
         private volatile bool _tapOk;
+        private volatile bool _lost;            // the tap was taken: don't take it back until reopened (Relisten)
 
         public DigiEngine(IKainosHost host) { _host = host; }
 
@@ -110,8 +111,9 @@ namespace Kainos.DigiModes
         {
             int rx = Rx;
             if (_tapOk && _tapRx == rx) return true;
+            if (_lost) return false;
             string why;
-            if (!_host.Audio.AcquireRx(rx, () => { _tapOk = false; RxLost?.Invoke(); }, out why))
+            if (!_host.Audio.AcquireRx(rx, () => { _tapOk = false; _lost = true; RxLost?.Invoke(); }, out why))
             {
                 Status?.Invoke("Can't listen to RX" + (rx + 1) + ": " + why);
                 return false;
@@ -125,7 +127,7 @@ namespace Kainos.DigiModes
         public bool Listening { get { return _tapOk; } }
 
         // the receive tap was taken (RTTY / CW opened): listen again (the UI calls this when the pane is reopened)
-        public void Relisten() { _tapOk = false; }
+        public void Relisten() { _tapOk = false; _lost = false; }
 
         private void work()
         {

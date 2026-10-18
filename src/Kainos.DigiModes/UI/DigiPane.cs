@@ -244,7 +244,6 @@ namespace Kainos.DigiModes.UI
             });
             _e.Status += s => _host.BeginInvoke(() => status(s));
             _e.Changed += () => _host.BeginInvoke(refreshAll);
-            _e.RxLost += () => _host.BeginInvoke(() => status("Another terminal took the receiver's audio. Close it and reopen FT8 / FT4 to decode again."));
             _e.Qso.Logged += q => _host.BeginInvoke(() => logged(q));
         }
 
