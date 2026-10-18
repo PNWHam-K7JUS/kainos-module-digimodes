@@ -1,6 +1,6 @@
 ﻿/*  BandEditForm.cs
 
-Edit the Band menu: a line per entry, its name then the FT8, FT4, JT65, JT9 and WSPR dial frequencies in MHz ("-" for none).
+Edit the Band menu: a line per entry, its name then the FT8, FT4, JT65, JT9, WSPR and FT2 dial frequencies in MHz ("-" for none).
 
 This file is part of the Kainos Digital Modes module. Copyright (C) 2026 Justin Cron K7JUS. GPLv3 or later.
 */
@@ -31,7 +31,7 @@ namespace Kainos.DigiModes.UI
             Label how = new Label
             {
                 Dock = DockStyle.Top, Height = 54, Padding = new Padding(8, 8, 8, 0),
-                Text = "One band a line: a name, then the FT8, FT4, JT65, JT9 and WSPR dial frequencies in MHz (\"-\" for none).\r\n" +
+                Text = "One band a line: a name, then the FT8, FT4, JT65, JT9, WSPR and FT2 dial frequencies in MHz (\"-\" for none).\r\n" +
                        "Add your own, e.g. a DXpedition's:  DXped 14.090 -",
             };
             _text = new TextBox { Multiline = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, Font = new Font("Consolas", 10), Text = current, AcceptsReturn = true, WordWrap = false };

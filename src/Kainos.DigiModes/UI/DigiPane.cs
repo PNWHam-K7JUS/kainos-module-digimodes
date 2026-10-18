@@ -61,7 +61,7 @@ namespace Kainos.DigiModes.UI
                 Controls.Add(b);
                 return b;
             };
-            _mode = btn("FT8", "The mode: FT8 (15 s), FT4 (7.5 s), JT65 and JT9 (1 minute), WSPR (2-minute beacons)");
+            _mode = btn("FT8", "The mode: FT8 (15 s), FT4 (7.5 s), FT2 (3.75 s, experimental), JT65 and JT9 (1 minute), WSPR (2-minute beacons)");
             _band = btn("Band", "Tune to a band's FT8 / FT4 frequency (and set DIGU)");
             _rxSel = btn("RX1", "The receiver decoded: RX1 or RX2");
             _hold = btn("Hold Tx", "Keep the transmit frequency when answering someone (call on a clear frequency)");
@@ -193,7 +193,7 @@ namespace Kainos.DigiModes.UI
                 foreach (FtxMode m in FtxModes.All)
                 {
                     FtxMode mm = m;
-                    ToolStripMenuItem it = new ToolStripMenuItem(m.ToString()) { Checked = m == _e.Mode };
+                    ToolStripMenuItem it = new ToolStripMenuItem(FtxModes.Label(m)) { Checked = m == _e.Mode };
                     it.Click += (s2, e2) => setMode(mm);
                     menu.Items.Add(it);
                 }
@@ -471,6 +471,7 @@ namespace Kainos.DigiModes.UI
             if (_statusText.Length == 0)
                 _status.Text = !_e.Decoder.Available ? "Decoder (jt9.exe) not found: see Settings" :
                                !_e.Listening ? "Not listening" :
+                               FtxModes.Experimental(_e.Mode) ? "FT2 is experimental: checked against WSJT-X Improved, not yet on the air against Decodium" :
                                _e.Mode == FtxMode.WSPR ? "WSPR: " + (_e.TxEnabled ? "beacon on, " + _e.WsprTxPercent + " % of periods, " + _e.WsprDbm + " dBm" : "listening") +
                                    (_host.GetSetting("wsprnet", "0") == "1" ? ", uploading to WSPRnet" : "") :
                                _e.Qso.Activity != Contest.None ? "Contest: " + QsoEngine.Name(_e.Qso.Activity) + (_e.Qso.MyExch.Length > 0 ? " (sending " + _e.Qso.MyExch + ")" : "") : "";
