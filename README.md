@@ -1,4 +1,4 @@
-﻿# Kainos Digital Modes (FT8 / FT4)
+﻿# Kainos Digital Modes (FT8 / FT4 / JT65 / JT9 / WSPR)
 
 A module for [Kainos](https://github.com/PNWHam-K7JUS/Kainos), the Hermes Lite 2 SDR program: FT8 and FT4 inside Kainos, in the Kainos look, with no virtual audio cables or CAT set-up.
 
@@ -8,13 +8,18 @@ A module for [Kainos](https://github.com/PNWHam-K7JUS/Kainos), the Hermes Lite 2
 - **Band menu**: tunes to the band's FT8 or FT4 frequency and sets DIGU.
 - **Log QSO**: when a QSO completes, a window opens with its details filled in. You can check or add to them before logging, or turn the window off to log straight away. Each QSO is added to `kainos-digimodes.adi` (Settings, "Open the log folder").
 - **Works with GridTracker, JTAlert, N1MM+, Log4OM, HRD, DXKeeper and others.** The module sends WSJT-X's UDP messages to 127.0.0.1:2237 by default: decodes, status, and logged QSOs (as a QSO message and as ADIF). It also takes their requests: double-click a station in GridTracker to answer it, halt TX, send free text, or replay recent decodes. Set those programs up as you would for WSJT-X.
-- **Waterfall** of the 0 to 3000 Hz audio, with the last period's stations labelled along its top. It takes about a third of the pane, so it grows when you drag the pane taller.
+- **Waterfall** of the 0 to 3000 Hz audio, with the last period's stations labelled along its top. It takes about a third of the pane, so it grows when you drag the pane taller. At 125 % or 150 % display scaling it is drawn at the screen's own resolution, not enlarged and blurred by Windows as the rest of Kainos is (Settings, "Sharp waterfall", to turn this off).
 - **PSK Reporter** (off by default; Settings): every 5 minutes the stations you decode are reported to pskreporter.info, in the same format WSJT-X uses.
 - **Worked before**: each decode shows the station's country, and a tag when it's new: **NEW DXCC**, **NEW BAND** (an entity new on this band), **NEW GRID** or **GRID BAND**. Stations already worked on this band are dimmed. This uses your QSOs here plus, if you add one in Settings, your main log exported as ADIF. Countries come from cty.dat.
 - **Filters** on band activity: **CQ only** (calls to you still show) and **Hide worked**.
 - **Clock check**: the stations' median DT is shown beside the clock. If it's 0.6 s or more off, you're told to synchronise the PC's clock.
 - **ALL.TXT**: every decode and transmission is written to the log folder in WSJT-X's format.
 - **Sounds** when someone calls you, and optionally when a new DXCC entity calls CQ.
+- **Five modes** from the mode button: **FT8**, **FT4**, **JT65** and **JT9** (one-minute QSOs with RRR, as WSJT-X and JTDX make them), and **WSPR** beacons. All are decoded by WSJT-X's own jt9 and wsprd.
+- **WSPR**: decodes every two-minute period. **Beacon** transmits your call, grid and power in a share of periods (Settings > WSPR, 20 % usual; the Tx watchdog doesn't apply). With Settings > WSPR > Upload ticked, spots go to wsprnet.org (off by default). WSPR spots are also sent over UDP as WSJT-X does.
+- **Contests** (Settings > Contest): ARRL Field Day, ARRL RTTY Roundup (serial numbers outside the US and Canada), NA VHF and WW Digi. These use WSJT-X's messages (CQ FD / RU / TEST / WW), sent with your exchange in place of the report, and auto-sequence to RR73. When you call CQ, each completed QSO goes straight back to CQ. The exchanges are logged in the ADIF contest fields and sent over UDP.
+- **Hound mode** for working DXpeditions in WSJT-X's Fox/Hound mode (Settings > Contest > Hound). It calls the Fox's base call at 1000 Hz or above in the second periods. It follows the Fox's two-part messages, even when his hashed call shows as <...>. It sends R+report on the frequency he called you on, moving 300 Hz on each repeat, and logs at his RR73. As in WSJT-X, Enable Tx has to be pressed every 2 minutes. FT8 only; SuperFox isn't supported (its decoder isn't in the bundled WSJT-X).
+- **Band frequencies** are editable (Band > Edit band frequencies...): add a DXpedition or 60 m channel, or change any default.
 - **Tx watchdog** and **Halt Tx**. Transmitting also stops if the radio is un-keyed elsewhere.
 
 ## Installing
@@ -42,6 +47,7 @@ To test a build before it's released, use **Install from file...** with the zip 
 | `Qso/QsoEngine.cs` | Generates the six messages and runs the auto-sequencing. Logging is in `AdifLog.cs`. |
 | `DigiEngine.cs` | The period clock and decode schedule, plus timed transmit through Kainos's transmit audio feed. |
 | `UI/` | The pane, drawn in the Kainos colours. |
+| Sharp waterfall | Kainos isn't DPI-aware, so Windows enlarges it as a picture at 125 % / 150 %. The waterfall sits in Kainos's `KainosCrispHost` (Kainos.ModuleApi, Kainos 1.0.11 and later), which puts it in a per-monitor-aware window of its own, kept over the pane. The waterfall works in screen pixels and scales its sizes by `KainosCrispHost.DpiScale`. |
 
 ## Building
 
@@ -56,6 +62,8 @@ The script builds the module, then runs `tests\Kainos.DigiModes.SelfTest`. The s
 - the encoder against `ft8code`;
 - that FT8 and FT4 survive the full path to `jt9` (tones, GFSK at 48 kHz, noise, the 12 kHz resampler) and decode at the right frequency with DT 0.0;
 - the slot recorder's timing, the sequencer, and the output parser.
+
+`Kainos.DigiModes.SelfTest.exe <WSJT-X bin> --show` opens the pane in a stand-in Kainos with a made-up waterfall, to look at; add `--blurry` for the waterfall as Windows stretches it.
 
 It then writes `dist\kainos-digimodes-<version>.zip` and `dist\registry-entry.json`. To publish a version:
 

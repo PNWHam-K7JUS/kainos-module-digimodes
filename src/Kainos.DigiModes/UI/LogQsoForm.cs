@@ -17,7 +17,7 @@ namespace Kainos.DigiModes.UI
     internal class LogQsoForm : Form
     {
         private readonly QsoRecord _q;
-        private readonly TextBox _call, _grid, _sent, _rcvd, _name, _power, _comments, _op;
+        private readonly TextBox _call, _grid, _sent, _rcvd, _name, _power, _comments, _op, _exSent, _exRcvd;
         private readonly DateTimePicker _on, _off;
 
         public LogQsoForm(QsoRecord q, string band)
@@ -60,6 +60,12 @@ namespace Kainos.DigiModes.UI
             _comments = field("Comments", q.Comments, 300);
             _op = field("Operator", q.Operator, 120);
             _op.CharacterCasing = CharacterCasing.Upper;
+            if (q.Contest != Contest.None)
+            {
+                _exSent = field("Exchange sent", q.ExchSent, 120);
+                _exRcvd = field("Exchange received", q.ExchRcvd, 120);
+                _exRcvd.CharacterCasing = CharacterCasing.Upper;
+            }
             Controls.Add(new Label
             {
                 Text = (q.Mode ?? "") + "   " + band + "   " + ((q.DialHz + q.AudioHz) / 1e6).ToString("0.000000", CultureInfo.InvariantCulture) + " MHz",
@@ -88,6 +94,7 @@ namespace Kainos.DigiModes.UI
             _q.TxPower = _power.Text.Trim();
             _q.Comments = _comments.Text.Trim();
             _q.Operator = _op.Text.Trim();
+            if (_exSent != null) { _q.ExchSent = _exSent.Text.Trim(); _q.ExchRcvd = _exRcvd.Text.Trim(); }
         }
     }
 }

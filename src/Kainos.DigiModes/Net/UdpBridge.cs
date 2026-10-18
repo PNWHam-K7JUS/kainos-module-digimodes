@@ -1,4 +1,4 @@
-/*  UdpBridge.cs
+﻿/*  UdpBridge.cs
 
 Connects the FT8 / FT4 station to WSJT-X's UDP messages (WsjtxUdp.cs): what happens here goes out, and what
 GridTracker, JTAlert and the loggers ask for comes in.
@@ -55,7 +55,7 @@ namespace Kainos.DigiModes.Net
             {
                 if (!_udp.Running) return;
                 _udp.QsoLogged(q.Off, q.Call, q.Grid, (ulong)Math.Max(0, q.DialHz + q.AudioHz), mode.ToString(), q.RstSent, q.RstRcvd,
-                               q.TxPower, q.Comments, q.Name, q.On, q.Operator, _e.Qso.MyCall, _e.Qso.MyGrid);
+                               q.TxPower, q.Comments, q.Name, q.On, q.Operator, _e.Qso.MyCall, _e.Qso.MyGrid, q.ExchSent, q.ExchRcvd);
                 _udp.LoggedAdif(rec);
             };
 
@@ -64,7 +64,7 @@ namespace Kainos.DigiModes.Net
             {
                 DateTime slot = DateTime.UtcNow.Date + r.Time;
                 if (slot > DateTime.UtcNow.AddMinutes(1)) slot = slot.AddDays(-1);
-                FtxMode m = r.Mode == "+" ? FtxMode.FT4 : FtxMode.FT8;
+                FtxMode m = r.Mode == "+" ? FtxMode.FT4 : r.Mode == "#" ? FtxMode.JT65 : r.Mode == "@" ? FtxMode.JT9 : FtxMode.FT8;
                 if (m != _e.Mode) { _host.Log("UDP reply for " + m + " ignored while in " + _e.Mode); return; }
                 _pane.AnswerExternal(new DecodeLine { SlotUtc = slot, Snr = r.Snr, Dt = r.Dt, Freq = (int)r.Df, Message = Pack77.Normalise(r.Message), Mode = m });
             });
@@ -112,7 +112,10 @@ namespace Kainos.DigiModes.Net
 
         private void send(DecodeLine d, bool isNew)
         {
-            _udp.Decode(isNew, d.SlotUtc, d.Snr, d.Dt, (uint)Math.Max(0, d.Freq), d.Mode == FtxMode.FT4 ? "+" : "~", d.Message, d.Ap);
+            if (d.Wspr != null)
+                _udp.WsprDecode(isNew, d.SlotUtc, d.Snr, d.Dt, (ulong)Math.Round(d.Wspr.FreqMHz * 1e6), d.Drift, d.Wspr.Call, d.Wspr.Grid, d.Wspr.Dbm);
+            else
+                _udp.Decode(isNew, d.SlotUtc, d.Snr, d.Dt, (uint)Math.Max(0, d.Freq), FtxModes.UdpChar(d.Mode), d.Message, d.Ap);
         }
 
         private void status(bool force)
@@ -133,6 +136,7 @@ namespace Kainos.DigiModes.Net
                         TxEnabled = _e.TxEnabled, Transmitting = _e.Transmitting, Decoding = _e.Decoding,
                         RxDf = (uint)_e.RxFreq, TxDf = (uint)_e.TxFreq,
                         PeriodS = (uint)Math.Round(FtxModes.Period(_e.Mode)),
+                        Special = (byte)_e.Qso.Activity,
                         TxMessage = _e.Qso.NextMessage,
                     };
                 }

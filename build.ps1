@@ -1,4 +1,4 @@
-# Builds the Digital Modes module and packages it for Kainos (Setup > Modules > Install from file, or a GitHub
+﻿# Builds the Digital Modes module and packages it for Kainos (Setup > Modules > Install from file, or a GitHub
 # release listed in Kainos's modules.json).
 #
 #   .\build.ps1 [-Wsjtx C:\WSJT\wsjtx] [-KainosBin "<Kainos>\Project Files\bin\x64\Release\"] [-SkipTests]
@@ -36,7 +36,7 @@ if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force "$stage\decoder" | Out-Null
 Copy-Item "$root\module.json", "$root\LICENSE", "$root\README.md", "$root\THIRD-PARTY.md" $stage
 Copy-Item "$root\src\Kainos.DigiModes\bin\Release\Kainos.DigiModes.dll" $stage
-$decoder = @("jt9.exe", "ft8code.exe", "libfftw3f-3.dll", "libgcc_s_seh-1.dll", "libgfortran-4.dll", "libgomp-1.dll",
+$decoder = @("jt9.exe", "ft8code.exe", "jt65code.exe", "jt9code.exe", "wsprd.exe", "libfftw3f-3.dll", "libgcc_s_seh-1.dll", "libgfortran-4.dll", "libgomp-1.dll",
              "libquadmath-0.dll", "libstdc++-6.dll", "libwinpthread-1.dll", "Qt5Core.dll")
 foreach ($f in $decoder) {
     $p = Join-Path $bin $f

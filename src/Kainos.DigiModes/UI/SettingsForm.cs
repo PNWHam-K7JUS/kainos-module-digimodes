@@ -1,4 +1,4 @@
-/*  SettingsForm.cs
+﻿/*  SettingsForm.cs
 
 The FT8 / FT4 settings: transmit level and timing, decoding, the decoder's folder; logging; and WSJT-X's UDP
 messages for other programs.
@@ -19,9 +19,10 @@ namespace Kainos.DigiModes.UI
     {
         private readonly IKainosHost _host;
         private readonly DigiEngine _e;
-        private readonly NumericUpDown _level, _lead, _rxlat, _depth, _watchdog, _port;
-        private readonly CheckBox _stop73, _logPrompt, _udpOn, _udpAccept, _psk, _sndMe, _sndDx;
-        private readonly TextBox _decoder, _power, _op, _udpHost, _udpId, _pskAntenna, _workLog;
+        private readonly NumericUpDown _level, _lead, _rxlat, _depth, _watchdog, _port, _wsprPct;
+        private readonly CheckBox _stop73, _logPrompt, _udpOn, _udpAccept, _psk, _sndMe, _sndDx, _crisp, _wsprNet;
+        private readonly TextBox _decoder, _power, _op, _udpHost, _udpId, _pskAntenna, _workLog, _exchange;
+        private readonly ComboBox _contest, _wsprDbm;
 
         public SettingsForm(IKainosHost host, DigiEngine e)
         {
@@ -78,6 +79,9 @@ namespace Kainos.DigiModes.UI
             _stop73 = check("Stop transmitting when the QSO ends (73)", e.StopAfter73, "As WSJT-X does: after 73, transmitting is turned off.");
             _sndMe = check("Sound when someone calls me", host.GetSetting("sndme", "1") == "1", "Windows's exclamation sound when a decode has your callsign.");
             _sndDx = check("Sound when a new DXCC entity calls CQ", host.GetSetting("snddxcc", "0") == "1", "Windows's asterisk sound when a CQ comes from an entity you haven't worked.");
+            _crisp = check("Sharp waterfall at 125 % / 150 % display scaling", host.GetSetting("crispwf", "1") == "1",
+                "Draws the waterfall at the screen's own resolution (in a window of its own, laid over the pane), where Windows would\r\n" +
+                "otherwise enlarge it and blur it. From the module's next start (Setup > Modules, or the next run of Kainos).");
 
             Controls.Add(new Label { Text = "Decoder folder (jt9.exe and ft8code.exe)", Location = new Point(x0, y), AutoSize = true });
             y += 20;
@@ -92,7 +96,21 @@ namespace Kainos.DigiModes.UI
             Controls.Add(browse);
             y += 26;
             Controls.Add(new Label { Text = "Empty: the decoder that came with the module. In use:\r\n" + (e.Decoder.Jt9Exe ?? "none"), Location = new Point(x0, y), Size = new Size(320, 44), ForeColor = SystemColors.GrayText });
-            int leftBottom = y + 44;
+            y += 50;
+            heading("WSPR");
+            Controls.Add(new Label { Text = "Beacon power (dBm)", Location = new Point(x0, y + 3), AutoSize = true });
+            _wsprDbm = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(x0 + 230, y), Width = 80 };
+            foreach (int p in Ftx.OtherModes.WsprPowers) _wsprDbm.Items.Add(p + (p == 30 ? " (1 W)" : p == 37 ? " (5 W)" : p == 40 ? " (10 W)" : ""));
+            _wsprDbm.SelectedIndex = Math.Max(0, Array.IndexOf(Ftx.OtherModes.WsprPowers, e.WsprDbm));
+            tips.SetToolTip(_wsprDbm, "The power your WSPR beacon reports (your transmitter's output into the antenna). 30 dBm = 1 W, 37 = 5 W.");
+            Controls.Add(_wsprDbm);
+            y += 30;
+            _wsprPct = row("Transmit in this share of periods (%)", 0, 100, e.WsprTxPercent, 5,
+                "With Beacon on, the share of 2-minute periods your WSPR beacon transmits in, chosen at random (WSJT-X's Tx Pct). 20 % is usual.");
+            _wsprNet = check("Upload the spots I hear to WSPRnet", host.GetSetting("wsprnet", "0") == "1",
+                "After each period, the WSPR stations decoded here go to wsprnet.org with your callsign and grid (or a 'listening' report\r\n" +
+                "when there are none), so they appear on its map. Off by default: it publishes your callsign and location.");
+            int leftBottom = y;
 
             // ---- right: logging, and other programs ----
             x0 = 360; y = 14;
@@ -141,6 +159,35 @@ namespace Kainos.DigiModes.UI
                 "Every 5 minutes, the stations decoded here (callsign, grid, frequency, SNR) are sent to PSK Reporter with your callsign and grid,\r\n" +
                 "so you and others can see on its map where signals are heard. Off by default: it publishes your callsign and location.");
             _pskAntenna = text("Antenna (optional)", host.GetSetting("pskantenna", ""), 160, "Shown with your reports on PSK Reporter, e.g. \"EFHW 40 m\".");
+            y += 6;
+            heading("Contest");
+            Controls.Add(new Label { Text = "Activity", Location = new Point(x0, y + 3), AutoSize = true });
+            _contest = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(x0 + 150, y), Width = 180 };
+            foreach (Qso.Contest c in new[] { Qso.Contest.None, Qso.Contest.FieldDay, Qso.Contest.RttyRoundup, Qso.Contest.NaVhf, Qso.Contest.WwDigi, Qso.Contest.Hound }) _contest.Items.Add(Qso.QsoEngine.Name(c));
+            int ci;
+            int.TryParse(host.GetSetting("contest", "0"), out ci);
+            _contest.SelectedItem = Qso.QsoEngine.Name((Qso.Contest)ci);
+            if (_contest.SelectedIndex < 0) _contest.SelectedIndex = 0;
+            tips.SetToolTip(_contest, "WSJT-X's contest messages: CQ FD / CQ RU / CQ TEST / CQ WW, your exchange in place of the signal report,\r\n" +
+                                      "and automatic sequencing to RR73. When you call CQ, each completed QSO goes straight back to CQ.");
+            Controls.Add(_contest);
+            y += 30;
+            _exchange = text("Your exchange", host.GetSetting("exchange", ""), 120, "");
+            _exchange.CharacterCasing = CharacterCasing.Upper;
+            Label exHint = new Label { Location = new Point(x0, y), Size = new Size(360, 30), ForeColor = SystemColors.GrayText };
+            Controls.Add(exHint);
+            Action hint = () =>
+            {
+                string n = (string)_contest.SelectedItem;
+                _exchange.Enabled = n == Qso.QsoEngine.Name(Qso.Contest.FieldDay) || n == Qso.QsoEngine.Name(Qso.Contest.RttyRoundup);
+                exHint.Text = n == Qso.QsoEngine.Name(Qso.Contest.FieldDay) ? "Field Day: your class and section, e.g. 1D WWA" :
+                              n == Qso.QsoEngine.Name(Qso.Contest.RttyRoundup) ? "Roundup: your state or province (e.g. WA); empty outside the US and Canada for serial numbers" :
+                              n == Qso.QsoEngine.Name(Qso.Contest.Hound) ? "Working a DXpedition in Fox / Hound mode: call at 1000 Hz or above; FT8 only" :
+                              n == Qso.QsoEngine.Name(Qso.Contest.None) ? "" : "The exchange is your grid square";
+            };
+            _contest.SelectedIndexChanged += (s, a) => hint();
+            hint();
+            y += 30;
             int rightBottom = y;
 
             y = Math.Max(leftBottom, rightBottom) + 8;
@@ -179,8 +226,19 @@ namespace Kainos.DigiModes.UI
             _host.SetSetting("udpid", _udpId.Text.Trim());
             _host.SetSetting("udpaccept", _udpAccept.Checked ? "1" : "0");
             _host.SetSetting("worklog", _workLog.Text.Trim());
+            _e.WsprDbm = Ftx.OtherModes.WsprPowers[Math.Max(0, _wsprDbm.SelectedIndex)];
+            _e.WsprTxPercent = (int)_wsprPct.Value;
+            _host.SetSetting("wsprdbm", _e.WsprDbm.ToString());
+            _host.SetSetting("wsprpct", _e.WsprTxPercent.ToString());
+            _host.SetSetting("wsprnet", _wsprNet.Checked ? "1" : "0");
+            Qso.Contest c = Qso.Contest.None;
+            foreach (Qso.Contest k in Enum.GetValues(typeof(Qso.Contest))) if (Qso.QsoEngine.Name(k) == (string)_contest.SelectedItem) c = k;
+            _host.SetSetting("contest", ((int)c).ToString());
+            _host.SetSetting("exchange", _exchange.Text.Trim());
+            lock (_e.Qso) { _e.Qso.Activity = c; _e.Qso.MyExchange = _exchange.Text.Trim(); }
             _host.SetSetting("sndme", _sndMe.Checked ? "1" : "0");
             _host.SetSetting("snddxcc", _sndDx.Checked ? "1" : "0");
+            _host.SetSetting("crispwf", _crisp.Checked ? "1" : "0");
             _host.SetSetting("psk", _psk.Checked ? "1" : "0");
             _host.SetSetting("pskantenna", _pskAntenna.Text.Trim());
             DigiModesModule.FindDecoder(_host, _e);

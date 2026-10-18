@@ -4,6 +4,8 @@ Checks the module without a radio: the encoder against WSJT-X's ft8code, and the
 48 kHz -> noise -> 12 kHz resampler -> jt9) decoding what was sent, for FT8 and FT4; the QSO sequencer; parsing.
 
   Kainos.DigiModes.SelfTest.exe <folder with jt9.exe and ft8code.exe>
+  Kainos.DigiModes.SelfTest.exe <folder> --show      the pane in a stand-in Kainos with a made-up waterfall, to look at
+                                         [--blurry]  ... with the waterfall as Windows stretches it (Sharp waterfall off)
 
 This file is part of the Kainos Digital Modes module. Copyright (C) 2026 Justin Cron K7JUS. GPLv3 or later.
 */
@@ -38,6 +40,7 @@ namespace Kainos.DigiModes.SelfTest
             string ft8code = Path.Combine(bin, "ft8code.exe"), jt9 = Path.Combine(bin, "jt9.exe");
             string work = Path.Combine(Path.GetTempPath(), "kainos-digimodes-selftest");
             Directory.CreateDirectory(work);
+            if (args.Contains("--show")) return show(bin, work);
 
             // 1. the encoder gives ft8code's own FT8 tones
             string[] msgs = { "CQ K7JUS CN87", "K1ABC K7JUS CN87", "K7JUS K1ABC -12", "K1ABC K7JUS R-07", "K7JUS K1ABC RR73",
@@ -146,6 +149,240 @@ namespace Kainos.DigiModes.SelfTest
                 List<DecodeLine> p = Jt9Decoder.Parse("120015 -12  0.3 1234 ~  K7JUS K1ABC FN42           a1\n120015  -3 -0.1  456 ~  CQ W1AW FN31\n120015  -3 -0.1  456 ~  CQ W1AW FN31\n<DecodeFinished>   0   2        0\n",
                     new DateTime(2026, 10, 16, 12, 0, 15, DateTimeKind.Utc), FtxMode.FT8);
                 check(p.Count == 2 && p[0].Ap && p[0].Message == "K7JUS K1ABC FN42" && p[1].Snr == -3 && p[1].Freq == 456, "jt9 output parsed");
+            }
+
+            // 17. JT65, JT9 and WSPR on the air (simulated): our tones and FSK decoded by WSJT-X's jt9 and wsprd
+            {
+                foreach (FtxMode mode in new[] { FtxMode.JT65, FtxMode.JT9 })
+                {
+                    string exe = Path.Combine(bin, mode == FtxMode.JT65 ? "jt65code.exe" : "jt9code.exe"), m = "CQ K7JUS CN87", why, asDec;
+                    byte[] tones = OtherModes.JtTones(mode, exe, m, out asDec, out why);
+                    if (tones == null) { check(false, mode + " tones: " + why); continue; }
+                    float[] w = OtherModes.SynthesizeFsk(mode, tones, 1200, 12000);
+                    float[] slot = new float[720000];
+                    int at = (int)(FtxModes.TxStart(mode) * 12000);
+                    for (int i = 0; i < slot.Length; i++) slot[i] = (float)(gauss(rnd) * 0.05 + (i >= at && i - at < w.Length ? w[i - at] * 0.03 : 0));
+                    DateTime st = new DateTime(2026, 10, 16, 12, 10, 0, DateTimeKind.Utc);
+                    if (args.Contains("--keepwav")) Wav.Write16(Path.Combine(work, "test-" + mode + ".wav"), slot, 12000);
+                    List<DecodeLine> res = dec.Decode(mode, st, slot, 1200, "K7JUS", "CN87", "", out why);
+                    DecodeLine hit = res.FirstOrDefault(r => r.Message == m);
+                    check(hit != null && Math.Abs(hit.Dt) <= 0.3 && Math.Abs(hit.Freq - 1200) <= 3 && asDec == m,
+                        mode + " decodes: " + (hit != null ? hit.ToString() : "nothing (" + (why ?? "") + ", " + string.Join(" | ", res.Select(r => r.Message)) + ")") + ", encoder says it reads \"" + asDec + "\"");
+                }
+            }
+
+            // 18. the engine in JT65 and WSPR, on a simulated clock (decoding as it happens: JT65's and WSPR's decodes
+            // run long before the next period, so the frozen clock doesn't matter)
+            {
+                // JT65: W9XYZ calls CQ; we answer; his report; our R-report; his RRR; our 73
+                DateTime t0 = new DateTime(2026, 10, 16, 13, 0, 0, DateTimeKind.Utc);
+                DateTime vnow = t0.AddSeconds(-1);
+                SimAir air = new SimAir(vnow);
+                FakeHost host = new FakeHost(bin, Path.Combine(work, "jt65")) { Air = air, Clock = () => vnow, Window = null };
+                DigiEngine eng = new DigiEngine(host) { Now = () => vnow, SyncDecode = true, Mode = FtxMode.JT65, RxFreq = 1000, TxFreq = 1400, HoldTx = true };
+                eng.Decoder.Jt9Exe = jt9; eng.Decoder.WorkFolder = Path.Combine(work, "jt65-jt9"); eng.Jt65CodeExe = Path.Combine(bin, "jt65code.exe");
+                eng.Qso.MyCall = "K7JUS"; eng.Qso.MyGrid = "CN87"; eng.Qso.Jt = true;
+                eng.Activity();
+                string[] his = { "CQ W9XYZ EN37", null, "K7JUS W9XYZ -14", null, "K7JUS W9XYZ RRR" };
+                for (int i = 0; i < his.Length; i++)
+                {
+                    if (his[i] == null) continue;
+                    string why, asDec;
+                    byte[] tn = OtherModes.JtTones(FtxMode.JT65, eng.Jt65CodeExe, his[i], out asDec, out why);
+                    air.Add(t0.AddSeconds(i * 60 + 1.0), OtherModes.SynthesizeFsk(FtxMode.JT65, tn, 1000, SimAir.Rate));
+                }
+                List<string> sent = new List<string>();
+                bool answered = false;
+                eng.TxStarted += (slot, msg) => sent.Add(((int)Math.Round((slot - t0).TotalSeconds / 60)) + ":" + msg);
+                eng.Decoded += (slot, m, list) =>
+                {
+                    DecodeLine cq = list.FirstOrDefault(d => d.Message == "CQ W9XYZ EN37");
+                    if (cq == null || answered) return;
+                    answered = true;
+                    lock (eng.Qso) eng.Qso.Answer(cq);
+                    eng.TxSecond = true;
+                    eng.TxEnabled = true;
+                };
+                while (vnow < t0.AddSeconds(6 * 60)) { eng.Step(); vnow = vnow.AddMilliseconds(50); }
+                check(sent.Count == 3 && sent[0] == "1:W9XYZ K7JUS CN87" && sent[1].StartsWith("3:W9XYZ K7JUS R-") && sent[2] == "5:W9XYZ K7JUS 73",
+                    "JT65 QSO through the engine, each reply in the next minute: " + string.Join("  |  ", sent));
+
+                // WSPR: W9XYZ's beacon in the first period is decoded; ours goes out at the start of a period (100 % share)
+                DateTime w0 = new DateTime(2026, 10, 16, 14, 0, 0, DateTimeKind.Utc);
+                DateTime wnow = w0.AddSeconds(-1);
+                SimAir wair = new SimAir(wnow);
+                FakeHost wh = new FakeHost(bin, Path.Combine(work, "wsprengine")) { Air = wair, Clock = () => wnow, Window = null, Vfo = 14095600 };
+                DigiEngine we = new DigiEngine(wh) { Now = () => wnow, SyncDecode = true, Mode = FtxMode.WSPR, TxFreq = 1500, WsprDbm = 37, WsprTxPercent = 100 };
+                we.Wspr.Exe = Path.Combine(bin, "wsprd.exe"); we.Wspr.WorkFolder = Path.Combine(work, "wsprengine-wsprd");
+                we.Qso.MyCall = "K7JUS"; we.Qso.MyGrid = "CN87";
+                string wwhy;
+                wair.Add(w0.AddSeconds(1), OtherModes.SynthesizeFsk(FtxMode.WSPR, OtherModes.WsprTones("W9XYZ", "EN37", 30, out wwhy), 1450, SimAir.Rate).Select(v => v * 0.3f).ToArray());
+                List<DecodeLine> heard = new List<DecodeLine>();
+                List<string> wsent = new List<string>();
+                we.Decoded += (slot, m, list) => heard.AddRange(list);
+                we.TxStarted += (slot, msg) => wsent.Add(((int)Math.Round((slot - w0).TotalSeconds / 120)) + ":" + msg + "@" + (wnow - slot).TotalSeconds.ToString("0.0"));
+                while (wnow < w0.AddSeconds(118)) { we.Step(); wnow = wnow.AddMilliseconds(50); }
+                we.TxEnabled = true;
+                while (wnow < w0.AddSeconds(125)) { we.Step(); wnow = wnow.AddMilliseconds(50); }
+                DecodeLine wsp = heard.FirstOrDefault(d => d.Wspr != null && d.Wspr.Call == "W9XYZ");
+                check(wsp != null && wsp.Wspr.Grid == "EN37" && wsp.Wspr.Dbm == 30 && Math.Abs(wsp.Wspr.FreqMHz - 14.09705) < 0.00002,
+                    "WSPR through the engine: W9XYZ's beacon decoded (" + (wsp != null ? wsp.Wspr.ToString() : "nothing") + ")");
+                check(wsent.Count == 1 && wsent[0].StartsWith("1:K7JUS CN87 37@"), "WSPR beacon sent at the start of a period: " + string.Join(" | ", wsent));
+            }
+
+            // 17b. WSPR: our encoder and FSK, decoded by WSJT-X's wsprd
+            {
+                string why;
+                byte[] wt = OtherModes.WsprTones("K7JUS", "CN87", 37, out why);
+                if (wt == null) check(false, "WSPR tones: " + why);
+                else
+                {
+                    float[] w = OtherModes.SynthesizeFsk(FtxMode.WSPR, wt, 1500, 12000);
+                    float[] slot = new float[(int)(114 * 12000)];
+                    for (int i = 0; i < slot.Length; i++) slot[i] = (float)(gauss(rnd) * 0.05 + (i >= 12000 && i - 12000 < w.Length ? w[i - 12000] * 0.01 : 0));
+                    Decode.WsprDecoder wd = new Decode.WsprDecoder { Exe = Path.Combine(bin, "wsprd.exe"), WorkFolder = Path.Combine(work, "wspr") };
+                    List<Decode.WsprSpot> sp = wd.Decode(new DateTime(2026, 10, 16, 12, 10, 0, DateTimeKind.Utc), slot, 14.0956, out why);
+                    Decode.WsprSpot s0 = sp.FirstOrDefault();
+                    check(s0 != null && s0.Call == "K7JUS" && s0.Grid == "CN87" && s0.Dbm == 37 && Math.Abs(s0.FreqMHz - 14.0971) < 0.00001 && Math.Abs(s0.Dt) <= 0.5,
+                        "WSPR decodes (wsprd): " + (s0 != null ? s0.ToString() : "nothing (" + (why ?? "") + ", raw: " + wd.LastOutput + ")"));
+                }
+                byte[] bad = OtherModes.WsprTones("K7JUS/P", "CN87", 37, out why);
+                byte[] badPwr = OtherModes.WsprTones("K7JUS", "CN87", 36, out why);
+                check(bad == null && badPwr == null, "WSPR refuses what it can't send (compound calls, odd powers)");
+            }
+
+            // 16. Hound (DXpedition): the QSO with a Fox, his two-part messages, frequencies; and jt9 resolving the Fox's
+            // hashed call when it's told who we're working
+            {
+                Func<string, int, int, DecodeLine> d = (m, s, f) => new DecodeLine { Message = m, Snr = s, Freq = f, Mode = FtxMode.FT8 };
+                QsoEngine h = new QsoEngine { MyCall = "K7JUS", MyGrid = "CN87", Activity = Contest.Hound };
+                List<QsoRecord> hl = new List<QsoRecord>();
+                h.Logged += r => hl.Add(r);
+                h.Answer(d("CQ KH1/KH7Z", -9, 420));
+                string tx1 = h.NextMessage;
+                h.Sequence(new[] { d("W9XYZ RR73; K7JUS <KH1/KH7Z> -17", -11, 480) }, tx1);
+                string tx3 = h.NextMessage;
+                int at = h.FoxCalledAt;
+                h.Sequence(new[] { d("K7JUS RR73; G4AAA <KH1/KH7Z> -09", -10, 480) }, tx3);
+                bool flow = tx1 == "KH7Z K7JUS CN87" && tx3 == "KH7Z K7JUS R-11" && at == 480 && hl.Count == 1 && hl[0].Call == "KH1/KH7Z" && hl[0].RstRcvd == "-17" && h.Done;
+
+                // the plain form: "K7JUS KH7Z -13", then "K7JUS KH7Z RR73"
+                QsoEngine h2 = new QsoEngine { MyCall = "K7JUS", MyGrid = "CN87", Activity = Contest.Hound, HisCall = "KH1/KH7Z", Next = 1 };
+                h2.Sequence(new[] { d("K7JUS KH7Z -13", -8, 360) }, null);
+                bool plain = h2.Next == 3 && h2.FoxCalledAt == 360;
+                h2.Sequence(new[] { d("K7JUS KH7Z RR73", -8, 360) }, null);
+                plain &= h2.Done;
+
+                // frequencies: calls at 1000 Hz or above; R+report where Fox called, then 300 Hz away, then back
+                DigiEngine he = new DigiEngine(new FakeHost(bin, Path.Combine(work, "hound"))) { TxFreq = 800 };
+                he.Qso.Activity = Contest.Hound; he.Qso.HisCall = "KH1/KH7Z"; he.Qso.Next = 1;
+                int c1 = he.houndFreq();
+                he.Qso.Next = 3; he.Qso.FoxCalledAt = 420;
+                int r1 = he.houndFreq(), r2 = he.houndFreq(), r3 = he.houndFreq();
+                bool freqs = c1 == 1000 && r1 == 420 && r2 == 720 && r3 == 420;
+
+                string why;
+                PackedMessage pa = Pack77.Pack(ft8code, tx1, out why), pb = Pack77.Pack(ft8code, tx3, out why);
+                bool packs = pa != null && pa.Decoded == tx1 && pb != null && pb.Decoded == tx3;
+
+                // a Fox's two-part message on the air: decoded, with <KH1/KH7Z> resolved when jt9 knows we're working him
+                string fox = "W9XYZ RR73; K7JUS <KH1/KH7Z> -17";
+                PackedMessage pf = Pack77.Pack(ft8code, fox, out why);
+                bool air = false; string got = why ?? "";
+                if (pf != null)
+                {
+                    float[] wave = FtxModulator.Synthesize(FtxMode.FT8, FtxEncoder.Ft8Tones(FtxEncoder.PayloadFromBits(pf.Bits77)), 480, 12000);
+                    float[] slot = new float[180000];
+                    for (int i = 0; i < slot.Length; i++) slot[i] = (float)(gauss(rnd) * 0.02 + (i >= 6000 && i - 6000 < wave.Length ? wave[i - 6000] * 0.1 : 0));
+                    List<DecodeLine> res = dec.Decode(FtxMode.FT8, new DateTime(2026, 10, 16, 12, 2, 0, DateTimeKind.Utc), slot, 480, "K7JUS", "CN87", "KH1/KH7Z", out why);
+                    got = string.Join(" | ", res.Select(r => r.Message));
+                    DecodeLine heard = res.FirstOrDefault(r => r.Message.StartsWith("W9XYZ RR73; K7JUS"));
+                    // jt9 shows the hash as <...> (it can't resolve it in this mode): the sequencer must still take it as the Fox
+                    QsoEngine h3 = new QsoEngine { MyCall = "K7JUS", MyGrid = "CN87", Activity = Contest.Hound, HisCall = "KH1/KH7Z", Next = 1 };
+                    air = heard != null && h3.Sequence(new[] { heard }, null) && h3.Next == 3 && h3.FoxCalledAt == heard.Freq;
+                }
+                check(flow, "Hound: call the Fox (base call), his report in a two-part message, R+report, his RR73 logs it");
+                check(plain, "Hound: Fox's plain report and RR73");
+                check(freqs, "Hound frequencies: call at 1000 Hz or above (" + c1 + "), R+report at " + r1 + ", then " + r2 + ", then " + r3);
+                check(packs, "Hound messages pack exactly");
+                check(air, "a Fox's two-part message off the air (jt9: " + got + ") moves the Hound to R+report");
+            }
+
+            // 14. the Band menu list: parse, format, mistakes caught
+            {
+                string why;
+                List<Bands.Entry> l = Bands.Parse("40m 7.074 7.0475\r\n# a comment\r\nDXped 14.090 -\r\n60m 5.357", out why);
+                bool ok = l != null && l.Count == 3 && l[1].Name == "DXped" && l[1].Ft8 == 14090000 && l[1].Ft4 == 0 && l[2].Ft4 == 0 && l[0].Ft4 == 7047500;
+                string badWhy;
+                List<Bands.Entry> bad = Bands.Parse("40m 7.074\r\n20m fourteen", out badWhy);
+                List<Bands.Entry> round = Bands.Parse(Bands.Format(Bands.Defaults()), out why);
+                check(ok && bad == null && badWhy != null && badWhy.StartsWith("Line 2") && round != null && Bands.Format(round) == Bands.Format(Bands.Defaults()),
+                    "band frequencies: parse, mistakes caught (" + badWhy + "), defaults round-trip");
+            }
+
+            // 15. contests: every message the sequencer makes packs exactly (ft8code), and each flow runs to the log
+            {
+                Func<string, int, DecodeLine> d = (m, s) => new DecodeLine { Message = m, Snr = s, Freq = 1000, Mode = FtxMode.FT8 };
+                List<string> problems = new List<string>();
+                Action<QsoEngine> packs = q =>
+                {
+                    foreach (int n in new[] { 1, 2, 3, 6 })
+                    {
+                        string m = q.Message(n), why;
+                        PackedMessage pm = Pack77.Pack(ft8code, m, out why);
+                        if (pm == null || pm.Decoded != m) problems.Add(m + " -> " + (pm != null ? pm.Decoded : why));
+                    }
+                };
+
+                // Field Day: I answer W9XYZ's CQ; he sends R and his; I send RR73 and it's logged
+                QsoEngine fd = new QsoEngine { MyCall = "K7JUS", MyGrid = "CN87", Activity = Contest.FieldDay, MyExchange = "1D WWA" };
+                List<QsoRecord> logs = new List<QsoRecord>();
+                fd.Logged += r => logs.Add(r);
+                fd.Answer(d("CQ FD W9XYZ EN37", -8));
+                string fd1 = fd.NextMessage;
+                fd.Sequence(new[] { d("K7JUS W9XYZ R 6A WI", -7) }, null);
+                string fd3 = fd.NextMessage;
+                fd.Sent(fd3);
+                bool fdOk = fd1 == "W9XYZ K7JUS 1D WWA" && fd3 == "W9XYZ K7JUS RR73" && logs.Count == 1 && logs[0].ExchRcvd == "6A WI" && logs[0].ExchSent == "1D WWA" && fd.Done;
+                string adif = AdifLog.Record(logs.Count > 0 ? logs[0] : new QsoRecord(), FtxMode.FT8, "K7JUS", "CN87");
+                fdOk &= adif.Contains("<CONTEST_ID:7>ARRL-FD") && adif.Contains("<CLASS:2>6A") && adif.Contains("<ARRL_SECT:2>WI") && adif.Contains("<STX_STRING:6>1D WWA");
+                packs(fd);
+
+                // Field Day run: I call CQ FD; W9XYZ answers with his; I send R and mine; his RR73 logs it and I'm back to CQ
+                QsoEngine run = new QsoEngine { MyCall = "K7JUS", MyGrid = "CN87", Activity = Contest.FieldDay, MyExchange = "1D WWA", Next = 6 };
+                List<QsoRecord> runLog = new List<QsoRecord>();
+                run.Logged += r => runLog.Add(r);
+                string cq = run.NextMessage;
+                run.Sequence(new[] { d("K7JUS W9XYZ 6A WI", -3) }, cq);
+                string r2 = run.NextMessage;
+                run.Sequence(new[] { d("K7JUS W9XYZ RR73", -3) }, r2);
+                bool runOk = cq == "CQ FD K7JUS CN87" && r2 == "W9XYZ K7JUS R 1D WWA" && runLog.Count == 1 && runLog[0].Call == "W9XYZ" && run.Next == 6 && !run.Done && run.HisCall == "";
+
+                // RTTY Roundup outside the US: serial numbers, counting up
+                QsoEngine ru = new QsoEngine { MyCall = "DL1ABC", MyGrid = "JO62", Activity = Contest.RttyRoundup, MyExchange = "", Serial = 12 };
+                List<QsoRecord> ruLog = new List<QsoRecord>();
+                ru.Logged += r => ruLog.Add(r);
+                ru.Answer(d("CQ RU K7JUS CN87", -2));
+                string ru1 = ru.NextMessage;
+                ru.Sequence(new[] { d("DL1ABC K7JUS R 579 WA", -2) }, null);
+                ru.Sent(ru.NextMessage);
+                bool ruOk = ru1 == "K7JUS DL1ABC 599 0012" && ruLog.Count == 1 && ruLog[0].RstRcvd == "579" && ruLog[0].ExchRcvd == "579 WA" && ru.Serial == 13;
+                packs(ru);
+
+                // NA VHF: grids
+                QsoEngine vhf = new QsoEngine { MyCall = "K7JUS", MyGrid = "CN87", Activity = Contest.NaVhf };
+                vhf.Answer(d("CQ TEST W9XYZ EN37", -10));
+                string v1 = vhf.NextMessage;
+                vhf.Sequence(new[] { d("K7JUS W9XYZ R EN37", -10) }, null);
+                bool vhfOk = v1 == "W9XYZ K7JUS CN87" && vhf.NextMessage == "W9XYZ K7JUS RR73" && vhf.HisGrid == "EN37";
+                packs(vhf);
+                packs(new QsoEngine { MyCall = "K7JUS", MyGrid = "CN87", HisCall = "W9XYZ", Activity = Contest.WwDigi });
+
+                check(fdOk, "Field Day: answer a CQ, his R and exchange, RR73, logged with CLASS / ARRL_SECT");
+                check(runOk, "Field Day run: CQ FD, his exchange, R and mine, his RR73 logs it and it's back to CQ");
+                check(ruOk, "RTTY Roundup: serial numbers outside the US and Canada (" + ru1 + "), counting up");
+                check(vhfOk, "NA VHF: grids as the exchange");
+                check(problems.Count == 0, "every contest message packs exactly" + (problems.Count > 0 ? ": " + string.Join("; ", problems) : ""));
             }
 
             // 13. band activity filters, and ALL.TXT's line format
@@ -323,7 +560,8 @@ namespace Kainos.DigiModes.SelfTest
             // very next period (not a period late), starting on time; then transmitting stops after our 73
             // (in real time, with decoding in the background as in Kainos; FT8 and FT4 side by side, about 2 minutes)
             List<KeyValuePair<bool, string>> qsoResults = new List<KeyValuePair<bool, string>>();
-            System.Threading.Tasks.Parallel.ForEach(new[] { FtxMode.FT8, FtxMode.FT4 }, mode =>
+            bool quick = args.Contains("--quick");            // skips the real-time QSO (2 minutes)
+            System.Threading.Tasks.Parallel.ForEach(quick ? new FtxMode[0] : new[] { FtxMode.FT8, FtxMode.FT4 }, mode =>
             {
                 double p = FtxModes.Period(mode);
                 DateTime t0 = new DateTime(2026, 10, 16, 12, 0, 0, DateTimeKind.Utc);
@@ -407,7 +645,9 @@ namespace Kainos.DigiModes.SelfTest
                             for (int i = 0; i < 80; i++) l.Add(new UI.DecodeRow { Text = "120015 -12  0.3 1234  CQ K1ABC FN42", Kind = i % 5 == 0 ? UI.RowKind.Cq : UI.RowKind.Normal });
                         // the waterfall: a signal at 1500 Hz shows bright where 1500 Hz is, dark at 500 Hz
                         stage = "waterfall";
-                        UI.FreqStrip strip = all(w).OfType<UI.FreqStrip>().First();
+                        Kainos.Modules.KainosCrispHost crisp = all(w).OfType<Kainos.Modules.KainosCrispHost>().First();
+                        Console.WriteLine("      waterfall " + (crisp.Crisp ? "crisp, at " + Kainos.Modules.KainosCrispHost.DpiScale(crisp.Content) * 100 + " %" : "not crisp: " + crisp.NotCrispBecause) + "; " + crisp.Describe());
+                        UI.FreqStrip strip = (UI.FreqStrip)crisp.Content;
                         for (int i = 0; i < 60; i++)
                         {
                             float[] line = new float[SpectrumMaker.Bins];
@@ -484,6 +724,41 @@ namespace Kainos.DigiModes.SelfTest
                 yield return c;
                 foreach (System.Windows.Forms.Control d in all(c)) yield return d;
             }
+        }
+
+        // --show: the pane in a window like Kainos's (DPI-unaware, as Kainos is), the waterfall fed with a few made-up
+        // signals, until the window is closed
+        private static int show(string bin, string work)
+        {
+            FakeHost host = new FakeHost(bin.EndsWith("decoder") ? Path.GetDirectoryName(bin) : bin, Path.Combine(work, "data"));
+            host.Settings["decoder"] = bin;
+            if (Environment.GetCommandLineArgs().Contains("--blurry")) host.Settings["crispwf"] = "0";
+            System.Windows.Forms.Form w = new System.Windows.Forms.Form { Text = "Digital Modes preview", Width = 1300, Height = 420, BackColor = System.Drawing.Color.FromArgb(10, 14, 28) };
+            host.Window = w;
+            DigiModesModule mod = new DigiModesModule();
+            Random rnd = new Random(3);
+            int n = 0;
+            System.Windows.Forms.Timer feed = new System.Windows.Forms.Timer { Interval = (int)(SpectrumMaker.LineSeconds * 1000) };
+            feed.Tick += (s, e) =>
+            {
+                Kainos.Modules.KainosCrispHost ch = all(w).OfType<Kainos.Modules.KainosCrispHost>().FirstOrDefault();
+                if (ch == null) return;
+                if (n == 0) w.Text += ch.Crisp ? "  (waterfall crisp, " + Kainos.Modules.KainosCrispHost.DpiScale(ch.Content) * 100 + " %)" : "  (waterfall not crisp: " + ch.NotCrispBecause + ")";
+                float[] line = new float[SpectrumMaker.Bins];
+                for (int k = 0; k < line.Length; k++) line[k] = -60 + (float)(gauss(rnd) * 2);
+                int[] at = { 300, 520, 700, 1015, 1240, 1390, 1610, 1830, 2210, 2560 };
+                for (int j = 0; j < at.Length; j++)
+                    if (((n / 60) + j) % 3 != 0)
+                        for (int k = at[j] * SpectrumMaker.Bins / 3000; k < (at[j] + 50) * SpectrumMaker.Bins / 3000; k++) line[k] = -40 + j * 2 + (float)(gauss(rnd) * 3);
+                ((UI.FreqStrip)ch.Content).AddLine(line, 1000 + n * SpectrumMaker.LineSeconds);
+                n++;
+            };
+            w.Shown += (s, e) => { mod.Start(host); host.Menus[0].Click(); feed.Start(); };
+            System.Windows.Forms.Application.Run(w);
+            feed.Dispose();
+            mod.Stop();
+            mod.Dispose();
+            return 0;
         }
 
         private static void pump(int ms)

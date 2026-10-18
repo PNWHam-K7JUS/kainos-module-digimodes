@@ -1,6 +1,6 @@
 ﻿/*  DigiEngine.cs
 
-The running FT8 / FT4 station: the receiver's audio into the slot recorder, a decode at the end of every period,
+The running station (FT8, FT4, JT65, JT9, WSPR): the receiver's audio into the slot recorder, a decode at the end of every period,
 automatic sequencing, and transmitting in the chosen periods, timed by the PC's clock (keep it synchronised:
 Windows Time, Meinberg NTP or similar).
 
@@ -39,7 +39,10 @@ namespace Kainos.DigiModes
         public double RxLatencyMs;              // the receive path's delay
         public int WatchdogMinutes = 6;
         public bool StopAfter73 = true;
-        public string Ft8CodeExe;
+        public string Ft8CodeExe, Jt65CodeExe, Jt9CodeExe;
+        public readonly WsprDecoder Wspr = new WsprDecoder();
+        public int WsprDbm = 37;                // WSPR: the power sent in the beacon (dBm)
+        public int WsprTxPercent = 20;          // WSPR: the share of periods to transmit in
 
         public event Action<DateTime, FtxMode, List<DecodeLine>> Decoded;
         public event Action<string> Status;
@@ -190,7 +193,7 @@ namespace Kainos.DigiModes
         // into the period), so the reply is chosen before the next period starts, and a final one at the period's end
         // for stations late in time. The final pass reports only what the early one didn't.
 
-        private static double earlyAt(FtxMode m) { return m == FtxMode.FT8 ? 13.6 : 5.9; }
+        private static double earlyAt(FtxMode m) { return FtxModes.DecodeAt(m); }
         private static DateTime slotTime(double s) { return new DateTime((long)Math.Round(s * 1e7), DateTimeKind.Utc); }
 
         private void scheduleDecode()
@@ -209,10 +212,11 @@ namespace Kainos.DigiModes
                 runPass(sCur, cur, mode, true);
                 return;
             }
-            // the period that has just ended (its last 0.2 s in): the final pass
+            // the period that has just ended (its last 0.2 s in): the final pass (FT8 / FT4 only: JT65, JT9 and WSPR
+            // signals have ended well before their one decode)
             double sPrev = Math.Floor((newest + 0.2) / p) * p - p;
             DateTime prev = slotTime(sPrev);
-            if (prev > _finalSlot)
+            if (FtxModes.IsFtx(mode) && prev > _finalSlot)
             {
                 _finalSlot = prev;
                 runPass(sPrev, prev, mode, false);
@@ -224,16 +228,25 @@ namespace Kainos.DigiModes
             bool sent;
             lock (_txSlots) sent = _txSlots.Contains(slot.Ticks);
             if (sent) { deliver(slot, mode, new List<DecodeLine>()); return; }      // ours: nothing to decode, but the QSO moves on
-            double p = FtxModes.Period(mode), missing;
-            float[] samples = _rec.Cut(s, p, out missing);
-            if (samples == null || missing > p * 0.5) return;           // just started: not enough of the period
+            // WSPR: 114 s of the two minutes (the signal is 110.6 s from 1 s in); the others the whole period
+            double p = FtxModes.Period(mode), len = mode == FtxMode.WSPR ? 114 : p, missing;
+            float[] samples = _rec.Cut(s, len, out missing);
+            if (samples == null || missing > len * 0.5) return;         // just started: not enough of the period
             int rxf = RxFreq;
             string my = Qso.MyCall, grid = Qso.MyGrid, his = Qso.HisCall;
+            double dialMHz = _host.Radio.VfoHz(Rx) / 1e6;
             Action job = () =>
             {
                 string why;
-                // the early pass at depth 2 at most (about 0.5 s; depth 3 takes 1.7 s), so it's done before the next period
-                List<DecodeLine> res = Decoder.Decode(mode, slot, samples, rxf, my, grid, his, out why, early ? Math.Min(2, Decoder.Depth) : Decoder.Depth);
+                List<DecodeLine> res;
+                if (mode == FtxMode.WSPR)
+                {
+                    List<WsprSpot> spots = Wspr.Decode(slot, samples, dialMHz, out why);
+                    res = spots.Select(w => new DecodeLine { SlotUtc = slot, Mode = mode, Snr = w.Snr, Dt = w.Dt, Freq = w.AudioHz, Drift = w.Drift, Message = w.Message, Wspr = w }).ToList();
+                }
+                else
+                    // the early pass at depth 2 at most (about 0.5 s; depth 3 takes 1.7 s), so it's done before the next period
+                    res = Decoder.Decode(mode, slot, samples, rxf, my, grid, his, out why, early && FtxModes.IsFtx(mode) ? Math.Min(2, Decoder.Depth) : Decoder.Depth);
                 if (why != null) Status?.Invoke(why);
                 deliver(slot, mode, res);
             };
@@ -259,16 +272,18 @@ namespace Kainos.DigiModes
             {
                 string sent = null;
                 if (slot > _sequencedSlot) { sent = _lastSent; _lastSent = null; _sequencedSlot = slot; }
-                bool changed = Qso.Sequence(fresh, sent);
+                bool changed = FtxModes.HasQso(mode) && Qso.Sequence(fresh, sent);
                 // the QSO is over (73 sent or received): stop, as WSJT-X does; calling CQ again starts afresh
                 if (Qso.Done && StopAfter73 && TxEnabled) { TxEnabled = false; changed = true; }
+                // a Hound sends R+report when Fox calls him, as WSJT-X does, if he called Fox in the last 2 minutes
+                if (Qso.Hound && Qso.Next == 3 && !Qso.Done && !TxEnabled && (Now() - _lastHoundTx).TotalMinutes < 2) { TxEnabled = true; changed = true; }
                 if (changed) Changed?.Invoke();
             }
         }
 
         // how long into our period transmitting waits for the decode of the period before it (so the reply answers it),
         // before starting anyway with what it has
-        private static double maxWait(FtxMode m) { return m == FtxMode.FT8 ? 1.2 : 0.6; }
+        private static double maxWait(FtxMode m) { return m == FtxMode.FT8 ? 1.2 : m == FtxMode.FT4 ? 0.6 : 2.0; }
 
         // ---- transmitting ----
 
@@ -313,6 +328,37 @@ namespace Kainos.DigiModes
             return true;
         }
 
+        // WSPR: whether to transmit in this period, decided once at its start (WsprTxPercent of the periods)
+        private DateTime _wsprSlot;
+        private bool _wsprGo;
+        private readonly Random _wsprRnd = new Random();
+        private bool wsprChooses(DateTime slot)
+        {
+            if (slot != _wsprSlot) { _wsprSlot = slot; _wsprGo = _wsprRnd.NextDouble() * 100 < WsprTxPercent; }
+            return _wsprGo;
+        }
+
+        // ---- Hound frequencies (FT8 DXpedition Mode): calls at 1000 Hz or above; R+report on the frequency Fox called
+        // me on, 300 Hz away on each repeat ----
+
+        public int LastTxFreq { get; private set; }
+        private DateTime _lastHoundTx = DateTime.MinValue;
+        private int _houndRCount, _houndRFor;
+
+        internal int houndFreq()
+        {
+            int called;
+            lock (Qso)
+            {
+                if (Qso.Next != 3 || Qso.FoxCalledAt <= 0) { _houndRCount = 0; return Math.Max(1000, TxFreq); }
+                called = Qso.FoxCalledAt;
+            }
+            if (called != _houndRFor) { _houndRFor = called; _houndRCount = 0; }
+            int f = _houndRCount % 2 == 0 ? called : called + (called < 600 ? 300 : -300);
+            _houndRCount++;
+            return f;
+        }
+
         private void txTick()
         {
             DateTime now = Now();
@@ -321,43 +367,75 @@ namespace Kainos.DigiModes
             if (_tuneReq) { startTune(now); return; }
             if (!TxEnabled) return;
 
-            if ((now - _lastActivity).TotalMinutes > WatchdogMinutes)
+            FtxMode mode = Mode;
+            bool wspr = mode == FtxMode.WSPR;
+
+            // the Tx watchdog (a Hound must press Enable Tx at least every 2 minutes, as WSJT-X requires); not for WSPR
+            // beacons, which are meant to run unattended
+            int watchdog = Qso.Hound ? 2 : WatchdogMinutes;
+            if (!wspr && (now - _lastActivity).TotalMinutes > watchdog)
             {
                 TxEnabled = false;
-                Status?.Invoke("Transmit stopped: nothing from you for " + WatchdogMinutes + " minutes (the Tx watchdog)");
+                Status?.Invoke("Transmit stopped: nothing from you for " + watchdog + " minutes (the Tx watchdog)");
                 Changed?.Invoke();
                 return;
             }
 
-            FtxMode mode = Mode;
             double p = FtxModes.Period(mode);
             double t = SlotRecorder.Seconds(now);
             double s = Math.Floor(t / p) * p;
             long k = (long)Math.Round(s / p);
-            bool mine = (k & 1) == (TxSecond ? 1 : 0);
+            bool hound = Qso.Hound;
             double into = t - s;
             DateTime slot = new DateTime((long)Math.Round(s * 1e7), DateTimeKind.Utc);
+            // WSPR: a share of the periods, chosen at random (as WSJT-X's Tx Pct); the others: every other period
+            bool mine = wspr ? wsprChooses(slot) : (k & 1) == (TxSecond || hound ? 1 : 0);   // a Hound transmits in the second periods
             if (!mine || slot == _lastTxSlot || into > 2.0) return;      // not ours, already sent, or too late to start
             // the other station's period must be decoded first, so the message answers what he just sent
             DateTime prevSlot = slotTime(s - p);
             bool heard = _sequencedSlot >= prevSlot;
-            if (!heard && _tapOk && into < maxWait(mode)) return;
+            if (!wspr && !heard && _tapOk && into < maxWait(mode)) return;
             if (!_host.Radio.PowerOn) { Status?.Invoke("The radio is off"); TxEnabled = false; Changed?.Invoke(); return; }
+            if (hound && mode != FtxMode.FT8) { Status?.Invoke("Hound (DXpedition) mode is FT8 only"); TxEnabled = false; Changed?.Invoke(); return; }
+            if (!FtxModes.IsFtx(mode) && Qso.Activity != Contest.None) { Status?.Invoke("Contests and Hound mode are FT8 / FT4 only (Settings > Contest)"); TxEnabled = false; Changed?.Invoke(); return; }
             string m = _host.Radio.Mode(_host.Radio.TxReceiver);
             if (m != "DIGU" && m != "USB") { Status?.Invoke("Transmit needs DIGU (or USB) on the transmitting VFO"); TxEnabled = false; Changed?.Invoke(); return; }
 
-            string msg;
-            lock (Qso) msg = Qso.NextMessage;
-            string why;
-            PackedMessage pm = Pack77.Pack(Ft8CodeExe, msg, out why);
-            if (pm == null) { Status?.Invoke(why); TxEnabled = false; Changed?.Invoke(); return; }
-            if (pm.Decoded != null && pm.Decoded != Pack77.Normalise(msg)) Status?.Invoke("Will be received as: " + pm.Decoded);
+            // the message and its tones
+            string msg, why = null;
+            byte[] tones;
+            if (wspr)
+            {
+                msg = Qso.MyCall + " " + Qso.Grid4 + " " + WsprDbm;
+                tones = OtherModes.WsprTones(Qso.MyCall, Qso.MyGrid, WsprDbm, out why);
+            }
+            else if (FtxModes.IsFtx(mode))
+            {
+                lock (Qso) { Qso.Jt = false; msg = Qso.NextMessage; }
+                PackedMessage pm = Pack77.Pack(Ft8CodeExe, msg, out why);
+                tones = null;
+                if (pm != null)
+                {
+                    if (pm.Decoded != null && pm.Decoded != Pack77.Normalise(msg)) Status?.Invoke("Will be received as: " + pm.Decoded);
+                    msg = pm.Message;
+                    byte[] payload = FtxEncoder.PayloadFromBits(pm.Bits77);
+                    tones = mode == FtxMode.FT8 ? FtxEncoder.Ft8Tones(payload) : FtxEncoder.Ft4Tones(payload);
+                }
+            }
+            else
+            {
+                lock (Qso) { Qso.Jt = true; msg = Pack77.Normalise(Qso.NextMessage); }
+                string decodedAs;
+                tones = OtherModes.JtTones(mode, mode == FtxMode.JT65 ? Jt65CodeExe : Jt9CodeExe, msg, out decodedAs, out why);
+                if (tones != null && decodedAs != null && decodedAs != msg) Status?.Invoke("Will be received as: " + decodedAs);
+            }
+            if (tones == null) { Status?.Invoke(why ?? "Can't make that message"); TxEnabled = false; Changed?.Invoke(); return; }
 
             int rate = _host.Audio.TxRate;
             if (rate <= 0) { Status?.Invoke("No transmit audio stream"); return; }
-            byte[] payload = FtxEncoder.PayloadFromBits(pm.Bits77);
-            byte[] tones = mode == FtxMode.FT8 ? FtxEncoder.Ft8Tones(payload) : FtxEncoder.Ft4Tones(payload);
-            float[] wave = FtxModulator.Synthesize(mode, tones, TxFreq, rate);
+            // WSPR's 200 Hz window is 1400 - 1600 Hz
+            int txf = hound ? houndFreq() : wspr ? (TxFreq >= 1400 && TxFreq <= 1595 ? TxFreq : 1500) : TxFreq;
+            float[] wave = FtxModes.IsFtx(mode) ? FtxModulator.Synthesize(mode, tones, txf, rate) : OtherModes.SynthesizeFsk(mode, tones, txf, rate);
             float amp = (float)Math.Pow(10, LevelDb / 20.0);
             for (int i = 0; i < wave.Length; i++) wave[i] *= amp;
 
@@ -374,16 +452,18 @@ namespace Kainos.DigiModes
             _txSlot = slot;
             _lastTxSlot = slot;
             lock (_txSlots) { _txSlots.Add(slot.Ticks); if (_txSlots.Count > 200) _txSlots.Clear(); }
-            _lastSent = pm.Message;
-            lock (Qso) Qso.Sent(pm.Message);
+            _lastSent = msg;
+            if (!wspr) lock (Qso) Qso.Sent(msg);
             _halt = false;
             Transmitting = true;
             _moxSeen = false;
             _moxAskedAt = now;
             _host.Audio.TxStart();
             _host.BeginInvoke(() => _host.Radio.SetMox(true));
-            _host.Log("TX " + slot.ToString("HHmmss.f") + " " + mode + " " + TxFreq + " Hz: " + pm.Message);
-            TxStarted?.Invoke(slot, pm.Message);
+            _host.Log("TX " + slot.ToString("HHmmss.f") + " " + mode + " " + txf + " Hz: " + msg);
+            LastTxFreq = txf;
+            if (hound) _lastHoundTx = now;
+            TxStarted?.Invoke(slot, msg);
             Changed?.Invoke();
             feedTx(now);
         }

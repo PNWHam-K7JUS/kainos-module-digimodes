@@ -20,6 +20,7 @@ Copyright (C) 2026 Justin Cron K7JUS
 using System;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using Kainos.DigiModes.UI;
 using Kainos.Modules;
 
@@ -55,11 +56,23 @@ namespace Kainos.DigiModes
             _psk.Status += s => host.Log(s);
             _engine.Decoded += (slot, mode, list) =>
             {
-                if (!_psk.Running) return;
+                if (!_psk.Running || mode == Ftx.FtxMode.WSPR) return;        // WSPR spots go to WSPRnet instead
                 _psk.MyCall = host.Callsign;
                 _psk.MyGrid = host.Grid;
                 long dial = (long)host.Radio.VfoHz(_engine.Rx);
                 foreach (Decode.DecodeLine d in list) _psk.Add(d, dial);
+            };
+            // WSPRnet (off unless turned on in Settings): each WSPR period's spots, or a "listening" report
+            _wsprNet = new Net.WsprNet { Version = "Kainos DM " + ModuleVersion };
+            _wsprNet.Status += s => host.Log(s);
+            _engine.Decoded += (slot, mode, list) =>
+            {
+                if (mode != Ftx.FtxMode.WSPR || host.GetSetting("wsprnet", "0") != "1") return;
+                _wsprNet.MyCall = host.Callsign;
+                _wsprNet.MyGrid = host.Grid;
+                _wsprNet.Dbm = _engine.WsprDbm;
+                _wsprNet.TxPercent = _engine.TxEnabled ? _engine.WsprTxPercent : 0;
+                _wsprNet.Upload(slot, list.Where(d => d.Wspr != null).Select(d => d.Wspr).ToList(), host.Radio.VfoHz(_engine.Rx));
             };
             _view.SettingsChanged += () => { _udp.Apply(); applyPsk(); _view.LoadWorked(); };
             _view.LoadWorked();
@@ -70,6 +83,7 @@ namespace Kainos.DigiModes
 
         private Net.UdpBridge _udp;
         private Net.PskReporter _psk;
+        private Net.WsprNet _wsprNet;
 
         private void applyPsk()
         {
@@ -131,6 +145,10 @@ namespace Kainos.DigiModes
                 if (!File.Exists(jt9)) continue;
                 e.Decoder.Jt9Exe = jt9;
                 e.Ft8CodeExe = Path.Combine(c, "ft8code.exe");
+                e.Jt65CodeExe = Path.Combine(c, "jt65code.exe");
+                e.Jt9CodeExe = Path.Combine(c, "jt9code.exe");
+                e.Wspr.Exe = Path.Combine(c, "wsprd.exe");
+                e.Wspr.WorkFolder = Path.Combine(host.DataFolder, "wspr");
                 host.Log("decoder: " + jt9);
                 return;
             }

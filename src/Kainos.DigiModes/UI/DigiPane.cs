@@ -25,9 +25,10 @@ namespace Kainos.DigiModes.UI
         private readonly IKainosTheme _t;
         private readonly DigiEngine _e;
 
-        private readonly KButton _ft8, _ft4, _band, _rxSel, _hold, _second, _auto, _enable, _halt, _tune, _pop, _settings;
+        private readonly KButton _mode, _band, _rxSel, _hold, _second, _auto, _enable, _halt, _tune, _pop, _settings;
         private readonly Label _status, _clock;
         private readonly FreqStrip _strip;
+        private readonly KainosCrispHost _stripHost;
         private readonly DecodeList _activity, _rxList;
         private readonly Panel _qso;
         private readonly TextBox _hisCall, _hisGrid, _free;
@@ -60,8 +61,7 @@ namespace Kainos.DigiModes.UI
                 Controls.Add(b);
                 return b;
             };
-            _ft8 = btn("FT8", "FT8: 15 s periods");
-            _ft4 = btn("FT4", "FT4: 7.5 s periods (faster, for contests)");
+            _mode = btn("FT8", "The mode: FT8 (15 s), FT4 (7.5 s), JT65 and JT9 (1 minute), WSPR (2-minute beacons)");
             _band = btn("Band", "Tune to a band's FT8 / FT4 frequency (and set DIGU)");
             _rxSel = btn("RX1", "The receiver decoded: RX1 or RX2");
             _hold = btn("Hold Tx", "Keep the transmit frequency when answering someone (call on a clear frequency)");
@@ -80,7 +80,8 @@ namespace Kainos.DigiModes.UI
             Controls.Add(_clock);
 
             _strip = new FreqStrip(_t);
-            Controls.Add(_strip);
+            _stripHost = new KainosCrispHost(_strip, host.GetSetting("crispwf", "1") == "1");     // the waterfall at the screen's own resolution (Kainos.ModuleApi)
+            Controls.Add(_stripHost);
             _activity = new DecodeList(_t) { Title = "BAND ACTIVITY" };
             // filters: CQ only (and calls to me), hide stations already worked on this band
             _activity.Chips.Add(new DecodeList.Chip { Text = "CQ only", On = host.GetSetting("fcq", "0") == "1", Toggled = on => { _host.SetSetting("fcq", on ? "1" : "0"); applyFilter(); } });
@@ -134,7 +135,7 @@ namespace Kainos.DigiModes.UI
             if (!_built) return;        // adding the controls lays out before they all exist
             int pad = _t.S(4), bh = _t.S(24), x = pad, y = pad;
             Action<Control, int> place = (c, w) => { c.SetBounds(x, y, _t.S(w), bh); x += _t.S(w) + pad; };
-            place(_ft8, 44); place(_ft4, 44); x += pad;
+            place(_mode, 70); x += pad;
             place(_band, 64); place(_rxSel, 44); x += pad;
             place(_hold, 64); place(_second, 56); place(_auto, 68); x += pad;
             place(_enable, 76); place(_halt, 64); place(_tune, 52);
@@ -151,7 +152,7 @@ namespace Kainos.DigiModes.UI
             int leftW = Width - 3 * pad - qsoW;
             _qso.SetBounds(Width - pad - qsoW, y, qsoW, Math.Max(_t.S(60), Height - y - pad));
             int wfH = Math.Max(_t.S(48), Math.Min(_t.S(220), (Height - y) * 34 / 100));
-            _strip.SetBounds(pad, y, leftW, wfH);
+            _stripHost.SetBounds(pad, y, leftW, wfH);
             y += wfH + pad;
             int h = Math.Max(_t.S(40), Height - y - pad);
             int actW = (int)(leftW * 0.58);
@@ -186,8 +187,19 @@ namespace Kainos.DigiModes.UI
 
         private void wire()
         {
-            _ft8.Click += (s, e) => setMode(FtxMode.FT8);
-            _ft4.Click += (s, e) => setMode(FtxMode.FT4);
+            _mode.Click += (s, e) =>
+            {
+                ContextMenuStrip menu = new ContextMenuStrip();
+                foreach (FtxMode m in FtxModes.All)
+                {
+                    FtxMode mm = m;
+                    ToolStripMenuItem it = new ToolStripMenuItem(m.ToString()) { Checked = m == _e.Mode };
+                    it.Click += (s2, e2) => setMode(mm);
+                    menu.Items.Add(it);
+                }
+                menu.Closed += (s2, e2) => BeginInvoke(new Action(menu.Dispose));
+                menu.Show(_mode, new Point(0, _mode.Height));
+            };
             _band.Click += (s, e) => { buildBandMenu(); _bandMenu.Show(_band, new Point(0, _band.Height)); };
             _rxSel.Click += (s, e) => { _e.Rx = 1 - _e.Rx; _e.Relisten(); save(); refreshAll(); };
             _hold.Click += (s, e) => { _e.HoldTx = _hold.On; save(); };
@@ -226,8 +238,8 @@ namespace Kainos.DigiModes.UI
             _e.SpectrumLine += (line, t) => _host.BeginInvoke(() => _strip.AddLine(line, t));
             _e.TxStarted += (slot, msg) => _host.BeginInvoke(() =>
             {
-                string line = slot.ToString("HHmmss") + "  Tx " + _e.TxFreq.ToString().PadLeft(4) + "  " + msg;
-                allTxt(new[] { DigiPane.line(slot, _host.Radio.VfoHz(_host.Radio.TxReceiver), "Tx", _e.Mode, 0, 0, _e.TxFreq, msg) });
+                string line = slot.ToString("HHmmss") + "  Tx " + _e.LastTxFreq.ToString().PadLeft(4) + "  " + msg;
+                allTxt(new[] { DigiPane.line(slot, _host.Radio.VfoHz(_host.Radio.TxReceiver), "Tx", _e.Mode, 0, 0, _e.LastTxFreq, msg) });
                 _rxList.Add(new DecodeRow { Text = line, Kind = RowKind.Mine });
             });
             _e.Status += s => _host.BeginInvoke(() => status(s));
@@ -240,7 +252,11 @@ namespace Kainos.DigiModes.UI
         {
             if (_e.Mode == m) return;
             if (_e.Transmitting) _e.Halt();
+            _e.TxEnabled = false;           // a new mode starts with transmitting off
             _e.Mode = m;
+            lock (_e.Qso) _e.Qso.Jt = m == FtxMode.JT65 || m == FtxMode.JT9;
+            // WSPR signals live in 1400 - 1600 Hz
+            if (m == FtxMode.WSPR && (_e.TxFreq < 1400 || _e.TxFreq > 1595)) { _e.TxFreq = 1500; _e.RxFreq = 1500; }
             _activity.Separator("");
             save();
             refreshAll();
@@ -250,9 +266,9 @@ namespace Kainos.DigiModes.UI
         {
             _bandMenu.Items.Clear();
             int rx = _e.Rx;
-            foreach (Bands.Band b in Bands.All)
+            foreach (Bands.Entry b in Bands.Menu)
             {
-                double f = _e.Mode == FtxMode.FT8 ? b.Ft8 : b.Ft4;
+                double f = b.Freq(_e.Mode);
                 if (f <= 0) continue;
                 ToolStripMenuItem it = new ToolStripMenuItem(b.Name + "   " + (f / 1e6).ToString("0.0000", CultureInfo.InvariantCulture) + " MHz");
                 it.Click += (s, e) =>
@@ -264,10 +280,27 @@ namespace Kainos.DigiModes.UI
                 };
                 _bandMenu.Items.Add(it);
             }
+            _bandMenu.Items.Add(new ToolStripSeparator());
+            ToolStripMenuItem edit = new ToolStripMenuItem("Edit band frequencies...");
+            edit.Click += (s, e) => editBands();
+            _bandMenu.Items.Add(edit);
+        }
+
+        private void editBands()
+        {
+            using (BandEditForm f = new BandEditForm(Bands.Format(Bands.Menu)))
+            {
+                _t.Style(f);
+                if (f.ShowDialog(FindForm()) != DialogResult.OK) return;
+                Bands.Menu = f.Result;
+                bool isDefault = Bands.Format(f.Result) == Bands.Format(Bands.Defaults());
+                _host.SetSetting("bands", isDefault ? "" : Bands.Format(f.Result));
+            }
         }
 
         private void answer(DecodeLine d)
         {
+            if (!FtxModes.HasQso(_e.Mode)) return;            // WSPR spots are beacons: nothing to answer
             _e.Activity();
             bool ok;
             lock (_e.Qso) ok = _e.Qso.Answer(d);
@@ -343,6 +376,7 @@ namespace Kainos.DigiModes.UI
                 string rec = AdifLog.Append(path, q, mode, _e.Qso.MyCall, _e.Qso.MyGrid);
                 status("Logged " + q.Call + " (" + q.RstSent + " / " + q.RstRcvd + ") to kainos-digimodes.adi");
                 Worked.Add(q.Call, q.Grid, Bands.AdifBand(q.DialHz));
+                if (q.Contest == Contest.RttyRoundup) _host.SetSetting("serial", _e.Qso.Serial.ToString());
                 QsoCommitted?.Invoke(q, mode, rec);
             }
             catch (Exception ex) { status("Couldn't write the log: " + ex.Message); }
@@ -436,7 +470,10 @@ namespace Kainos.DigiModes.UI
             if (_statusText.Length > 0 && (now - _statusAt).TotalSeconds > 20) { _statusText = ""; _status.Text = ""; }
             if (_statusText.Length == 0)
                 _status.Text = !_e.Decoder.Available ? "Decoder (jt9.exe) not found: see Settings" :
-                               !_e.Listening ? "Not listening" : "";
+                               !_e.Listening ? "Not listening" :
+                               _e.Mode == FtxMode.WSPR ? "WSPR: " + (_e.TxEnabled ? "beacon on, " + _e.WsprTxPercent + " % of periods, " + _e.WsprDbm + " dBm" : "listening") +
+                                   (_host.GetSetting("wsprnet", "0") == "1" ? ", uploading to WSPRnet" : "") :
+                               _e.Qso.Activity != Contest.None ? "Contest: " + QsoEngine.Name(_e.Qso.Activity) + (_e.Qso.MyExch.Length > 0 ? " (sending " + _e.Qso.MyExch + ")" : "") : "";
             // the markers on the panadapter: RX (gold) and TX (red) at their audio frequencies above the VFO
             int rx = _e.Rx;
             string m = _host.Radio.Mode(rx);
@@ -451,8 +488,11 @@ namespace Kainos.DigiModes.UI
 
         private void refreshAll()
         {
-            _ft8.On = _e.Mode == FtxMode.FT8;
-            _ft4.On = _e.Mode == FtxMode.FT4;
+            _mode.Text = _e.Mode + " \u25BE";
+            // WSPR has no QSOs: the QSO controls rest, and Enable Tx turns the beacon on
+            bool qso = FtxModes.HasQso(_e.Mode);
+            _qso.Enabled = _hold.Enabled = _second.Enabled = _auto.Enabled = qso;
+            _enable.Text = qso ? "Enable Tx" : "Beacon";
             _rxSel.Text = "RX" + (_e.Rx + 1);
             _hold.On = _e.HoldTx;
             _second.Text = _e.TxSecond ? "Tx 2nd" : "Tx 1st";
@@ -497,7 +537,8 @@ namespace Kainos.DigiModes.UI
             Func<string, string, string> g = (k, d) => _host.GetSetting(k, d);
             Func<string, int, int> gi = (k, d) => { int v; return int.TryParse(g(k, ""), out v) ? v : d; };
             Func<string, double, double> gd = (k, d) => { double v; return double.TryParse(g(k, ""), NumberStyles.Float, CultureInfo.InvariantCulture, out v) ? v : d; };
-            _e.Mode = g("mode", "FT8") == "FT4" ? FtxMode.FT4 : FtxMode.FT8;
+            FtxMode saved;
+            _e.Mode = Enum.TryParse(g("mode", "FT8"), out saved) ? saved : FtxMode.FT8;
             _e.Rx = gi("rx", 0) == 1 ? 1 : 0;
             _e.RxFreq = Math.Max(100, Math.Min(2900, gi("rxf", 1500)));
             _e.TxFreq = Math.Max(100, Math.Min(2900, gi("txf", 1500)));
@@ -508,6 +549,14 @@ namespace Kainos.DigiModes.UI
             _e.TxLeadMs = Math.Max(0, Math.Min(1000, gd("lead", 0)));
             _e.RxLatencyMs = Math.Max(0, Math.Min(1000, gd("rxlat", 0)));
             _e.Decoder.Depth = Math.Max(1, Math.Min(3, gi("depth", 3)));
+            Bands.Load(g("bands", ""));
+            _e.Qso.Activity = (Contest)gi("contest", 0);
+            _e.Qso.MyExchange = g("exchange", "");
+            _e.Qso.Serial = Math.Max(1, gi("serial", 1));
+            int dbm = gi("wsprdbm", 37);
+            _e.WsprDbm = Array.IndexOf(OtherModes.WsprPowers, dbm) >= 0 ? dbm : 37;
+            _e.WsprTxPercent = Math.Max(0, Math.Min(100, gi("wsprpct", 20)));
+            _e.Qso.Jt = _e.Mode == FtxMode.JT65 || _e.Mode == FtxMode.JT9;
             applyFilter();
         }
 

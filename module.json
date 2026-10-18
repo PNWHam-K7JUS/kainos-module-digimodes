@@ -1,8 +1,8 @@
 {
   "id": "digimodes",
-  "name": "Digital Modes (FT8 / FT4)",
-  "description": "FT8 and FT4 inside Kainos: band activity, automatic QSO sequencing and an ADIF log, in the Kainos look. Decoding by WSJT-X's jt9 (included).",
-  "version": "0.6.2",
+  "name": "Digital Modes (FT8 / FT4 / JT65 / JT9 / WSPR)",
+  "description": "FT8, FT4, JT65, JT9 and WSPR inside Kainos: band activity, automatic QSO sequencing and an ADIF log, in the Kainos look. Decoding by WSJT-X's jt9 (included).",
+  "version": "0.9.0",
   "api": 1,
   "minKainos": "",
   "entry": "Kainos.DigiModes.dll",
