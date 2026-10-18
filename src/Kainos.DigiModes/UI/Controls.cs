@@ -403,7 +403,7 @@ namespace Kainos.DigiModes.UI
         // a period's decodes: each label at the middle of its signal (the period's start + 0.5 s + half the signal, + DT)
         public void AddLabels(DateTime slotUtc, Ftx.FtxMode mode, IEnumerable<DecodeLine> list)
         {
-            double half = (mode == Ftx.FtxMode.FT8 ? 79 * 0.160 : 105 * 0.048) / 2;
+            double half = Ftx.FtxModes.Duration(mode) / 2;
             double s0 = Decode.SlotRecorder.Seconds(slotUtc) + Ftx.FtxModes.TxStart(mode) + half;
             foreach (DecodeLine d in list)
                 _labels.Add(new TraceLabel { T = s0 + d.Dt, Hz = d.Freq, Text = Sender(d.Message), Cq = d.Message.StartsWith("CQ ") });

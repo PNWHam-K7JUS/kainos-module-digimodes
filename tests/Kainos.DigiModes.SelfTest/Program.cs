@@ -151,6 +151,106 @@ namespace Kainos.DigiModes.SelfTest
                 check(p.Count == 2 && p[0].Ap && p[0].Message == "K7JUS K1ABC FN42" && p[1].Snr == -3 && p[1].Freq == 456, "jt9 output parsed");
             }
 
+            // 17. JT65, JT9 and WSPR on the air (simulated): our tones and FSK decoded by WSJT-X's jt9 and wsprd
+            {
+                foreach (FtxMode mode in new[] { FtxMode.JT65, FtxMode.JT9 })
+                {
+                    string exe = Path.Combine(bin, mode == FtxMode.JT65 ? "jt65code.exe" : "jt9code.exe"), m = "CQ K7JUS CN87", why, asDec;
+                    byte[] tones = OtherModes.JtTones(mode, exe, m, out asDec, out why);
+                    if (tones == null) { check(false, mode + " tones: " + why); continue; }
+                    float[] w = OtherModes.SynthesizeFsk(mode, tones, 1200, 12000);
+                    float[] slot = new float[720000];
+                    int at = (int)(FtxModes.TxStart(mode) * 12000);
+                    for (int i = 0; i < slot.Length; i++) slot[i] = (float)(gauss(rnd) * 0.05 + (i >= at && i - at < w.Length ? w[i - at] * 0.03 : 0));
+                    DateTime st = new DateTime(2026, 10, 16, 12, 10, 0, DateTimeKind.Utc);
+                    if (args.Contains("--keepwav")) Wav.Write16(Path.Combine(work, "test-" + mode + ".wav"), slot, 12000);
+                    List<DecodeLine> res = dec.Decode(mode, st, slot, 1200, "K7JUS", "CN87", "", out why);
+                    DecodeLine hit = res.FirstOrDefault(r => r.Message == m);
+                    check(hit != null && Math.Abs(hit.Dt) <= 0.3 && Math.Abs(hit.Freq - 1200) <= 3 && asDec == m,
+                        mode + " decodes: " + (hit != null ? hit.ToString() : "nothing (" + (why ?? "") + ", " + string.Join(" | ", res.Select(r => r.Message)) + ")") + ", encoder says it reads \"" + asDec + "\"");
+                }
+            }
+
+            // 18. the engine in JT65 and WSPR, on a simulated clock (decoding as it happens: JT65's and WSPR's decodes
+            // run long before the next period, so the frozen clock doesn't matter)
+            {
+                // JT65: W9XYZ calls CQ; we answer; his report; our R-report; his RRR; our 73
+                DateTime t0 = new DateTime(2026, 10, 16, 13, 0, 0, DateTimeKind.Utc);
+                DateTime vnow = t0.AddSeconds(-1);
+                SimAir air = new SimAir(vnow);
+                FakeHost host = new FakeHost(bin, Path.Combine(work, "jt65")) { Air = air, Clock = () => vnow, Window = null };
+                DigiEngine eng = new DigiEngine(host) { Now = () => vnow, SyncDecode = true, Mode = FtxMode.JT65, RxFreq = 1000, TxFreq = 1400, HoldTx = true };
+                eng.Decoder.Jt9Exe = jt9; eng.Decoder.WorkFolder = Path.Combine(work, "jt65-jt9"); eng.Jt65CodeExe = Path.Combine(bin, "jt65code.exe");
+                eng.Qso.MyCall = "K7JUS"; eng.Qso.MyGrid = "CN87"; eng.Qso.Jt = true;
+                eng.Activity();
+                string[] his = { "CQ W9XYZ EN37", null, "K7JUS W9XYZ -14", null, "K7JUS W9XYZ RRR" };
+                for (int i = 0; i < his.Length; i++)
+                {
+                    if (his[i] == null) continue;
+                    string why, asDec;
+                    byte[] tn = OtherModes.JtTones(FtxMode.JT65, eng.Jt65CodeExe, his[i], out asDec, out why);
+                    air.Add(t0.AddSeconds(i * 60 + 1.0), OtherModes.SynthesizeFsk(FtxMode.JT65, tn, 1000, SimAir.Rate));
+                }
+                List<string> sent = new List<string>();
+                bool answered = false;
+                eng.TxStarted += (slot, msg) => sent.Add(((int)Math.Round((slot - t0).TotalSeconds / 60)) + ":" + msg);
+                eng.Decoded += (slot, m, list) =>
+                {
+                    DecodeLine cq = list.FirstOrDefault(d => d.Message == "CQ W9XYZ EN37");
+                    if (cq == null || answered) return;
+                    answered = true;
+                    lock (eng.Qso) eng.Qso.Answer(cq);
+                    eng.TxSecond = true;
+                    eng.TxEnabled = true;
+                };
+                while (vnow < t0.AddSeconds(6 * 60)) { eng.Step(); vnow = vnow.AddMilliseconds(50); }
+                check(sent.Count == 3 && sent[0] == "1:W9XYZ K7JUS CN87" && sent[1].StartsWith("3:W9XYZ K7JUS R-") && sent[2] == "5:W9XYZ K7JUS 73",
+                    "JT65 QSO through the engine, each reply in the next minute: " + string.Join("  |  ", sent));
+
+                // WSPR: W9XYZ's beacon in the first period is decoded; ours goes out at the start of a period (100 % share)
+                DateTime w0 = new DateTime(2026, 10, 16, 14, 0, 0, DateTimeKind.Utc);
+                DateTime wnow = w0.AddSeconds(-1);
+                SimAir wair = new SimAir(wnow);
+                FakeHost wh = new FakeHost(bin, Path.Combine(work, "wsprengine")) { Air = wair, Clock = () => wnow, Window = null, Vfo = 14095600 };
+                DigiEngine we = new DigiEngine(wh) { Now = () => wnow, SyncDecode = true, Mode = FtxMode.WSPR, TxFreq = 1500, WsprDbm = 37, WsprTxPercent = 100 };
+                we.Wspr.Exe = Path.Combine(bin, "wsprd.exe"); we.Wspr.WorkFolder = Path.Combine(work, "wsprengine-wsprd");
+                we.Qso.MyCall = "K7JUS"; we.Qso.MyGrid = "CN87";
+                string wwhy;
+                wair.Add(w0.AddSeconds(1), OtherModes.SynthesizeFsk(FtxMode.WSPR, OtherModes.WsprTones("W9XYZ", "EN37", 30, out wwhy), 1450, SimAir.Rate).Select(v => v * 0.3f).ToArray());
+                List<DecodeLine> heard = new List<DecodeLine>();
+                List<string> wsent = new List<string>();
+                we.Decoded += (slot, m, list) => heard.AddRange(list);
+                we.TxStarted += (slot, msg) => wsent.Add(((int)Math.Round((slot - w0).TotalSeconds / 120)) + ":" + msg + "@" + (wnow - slot).TotalSeconds.ToString("0.0"));
+                while (wnow < w0.AddSeconds(118)) { we.Step(); wnow = wnow.AddMilliseconds(50); }
+                we.TxEnabled = true;
+                while (wnow < w0.AddSeconds(125)) { we.Step(); wnow = wnow.AddMilliseconds(50); }
+                DecodeLine wsp = heard.FirstOrDefault(d => d.Wspr != null && d.Wspr.Call == "W9XYZ");
+                check(wsp != null && wsp.Wspr.Grid == "EN37" && wsp.Wspr.Dbm == 30 && Math.Abs(wsp.Wspr.FreqMHz - 14.09705) < 0.00002,
+                    "WSPR through the engine: W9XYZ's beacon decoded (" + (wsp != null ? wsp.Wspr.ToString() : "nothing") + ")");
+                check(wsent.Count == 1 && wsent[0].StartsWith("1:K7JUS CN87 37@"), "WSPR beacon sent at the start of a period: " + string.Join(" | ", wsent));
+            }
+
+            // 17b. WSPR: our encoder and FSK, decoded by WSJT-X's wsprd
+            {
+                string why;
+                byte[] wt = OtherModes.WsprTones("K7JUS", "CN87", 37, out why);
+                if (wt == null) check(false, "WSPR tones: " + why);
+                else
+                {
+                    float[] w = OtherModes.SynthesizeFsk(FtxMode.WSPR, wt, 1500, 12000);
+                    float[] slot = new float[(int)(114 * 12000)];
+                    for (int i = 0; i < slot.Length; i++) slot[i] = (float)(gauss(rnd) * 0.05 + (i >= 12000 && i - 12000 < w.Length ? w[i - 12000] * 0.01 : 0));
+                    Decode.WsprDecoder wd = new Decode.WsprDecoder { Exe = Path.Combine(bin, "wsprd.exe"), WorkFolder = Path.Combine(work, "wspr") };
+                    List<Decode.WsprSpot> sp = wd.Decode(new DateTime(2026, 10, 16, 12, 10, 0, DateTimeKind.Utc), slot, 14.0956, out why);
+                    Decode.WsprSpot s0 = sp.FirstOrDefault();
+                    check(s0 != null && s0.Call == "K7JUS" && s0.Grid == "CN87" && s0.Dbm == 37 && Math.Abs(s0.FreqMHz - 14.0971) < 0.00001 && Math.Abs(s0.Dt) <= 0.5,
+                        "WSPR decodes (wsprd): " + (s0 != null ? s0.ToString() : "nothing (" + (why ?? "") + ", raw: " + wd.LastOutput + ")"));
+                }
+                byte[] bad = OtherModes.WsprTones("K7JUS/P", "CN87", 37, out why);
+                byte[] badPwr = OtherModes.WsprTones("K7JUS", "CN87", 36, out why);
+                check(bad == null && badPwr == null, "WSPR refuses what it can't send (compound calls, odd powers)");
+            }
+
             // 16. Hound (DXpedition): the QSO with a Fox, his two-part messages, frequencies; and jt9 resolving the Fox's
             // hashed call when it's told who we're working
             {
@@ -460,7 +560,8 @@ namespace Kainos.DigiModes.SelfTest
             // very next period (not a period late), starting on time; then transmitting stops after our 73
             // (in real time, with decoding in the background as in Kainos; FT8 and FT4 side by side, about 2 minutes)
             List<KeyValuePair<bool, string>> qsoResults = new List<KeyValuePair<bool, string>>();
-            System.Threading.Tasks.Parallel.ForEach(new[] { FtxMode.FT8, FtxMode.FT4 }, mode =>
+            bool quick = args.Contains("--quick");            // skips the real-time QSO (2 minutes)
+            System.Threading.Tasks.Parallel.ForEach(quick ? new FtxMode[0] : new[] { FtxMode.FT8, FtxMode.FT4 }, mode =>
             {
                 double p = FtxModes.Period(mode);
                 DateTime t0 = new DateTime(2026, 10, 16, 12, 0, 0, DateTimeKind.Utc);

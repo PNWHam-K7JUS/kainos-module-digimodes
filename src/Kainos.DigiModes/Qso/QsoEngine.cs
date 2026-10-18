@@ -58,6 +58,10 @@ namespace Kainos.DigiModes.Qso
 
         public string Grid4 { get { return MyGrid.Length >= 4 ? MyGrid.Substring(0, 4) : MyGrid; } }
 
+        // JT65 / JT9 (their 72-bit messages): reports -01 to -30 only, and RRR where FT8 has RR73
+        public bool Jt;
+        public static string JtReport(int snr) { return Math.Max(-30, Math.Min(-1, snr)).ToString("00", CultureInfo.InvariantCulture); }
+
         public static string Report(int snr)
         {
             snr = Math.Max(-30, Math.Min(49, snr));
@@ -176,7 +180,7 @@ namespace Kainos.DigiModes.Qso
 
         public string Message(int n)
         {
-            string h = HisCall, m = MyCall, rpt = Report(HisSnr);
+            string h = HisCall, m = MyCall, rpt = Jt ? JtReport(HisSnr) : Report(HisSnr);
             if (Hound)
                 switch (n)
                 {
@@ -201,7 +205,7 @@ namespace Kainos.DigiModes.Qso
                 case 1: return h + " " + m + " " + Grid4;
                 case 2: return h + " " + m + " " + rpt;
                 case 3: return h + " " + m + " R" + rpt;
-                case 4: return h + " " + m + " RR73";
+                case 4: return h + " " + m + (Jt ? " RRR" : " RR73");
                 case 5: return h + " " + m + " 73";
                 case 6: return "CQ " + m + " " + Grid4;
                 default: return FreeText;

@@ -72,10 +72,13 @@ namespace Kainos.DigiModes.SelfTest
         private long _txWritten;
         private System.Diagnostics.Stopwatch _txClock;
         public long TxSamples;
-        public void TxStart() { _txWritten = 0; _txClock = System.Diagnostics.Stopwatch.StartNew(); }
+        private DateTime _txFrom;
+        // seconds since TxStart: by the simulated clock when there is one
+        private double txElapsed { get { return Clock != null ? (Clock() - _txFrom).TotalSeconds : _txClock.Elapsed.TotalSeconds; } }
+        public void TxStart() { _txWritten = 0; _txClock = System.Diagnostics.Stopwatch.StartNew(); if (Clock != null) _txFrom = Clock(); }
         public int TxWrite(float[] src, int n) { _txWritten += n; TxSamples += n; return n; }
-        public int TxQueued { get { return _txClock == null ? 0 : (int)Math.Max(0, _txWritten - _txClock.Elapsed.TotalSeconds * TxRate); } }
-        public void TxClear() { if (_txClock != null) _txWritten = (long)(_txClock.Elapsed.TotalSeconds * TxRate); }
+        public int TxQueued { get { return _txClock == null ? 0 : (int)Math.Max(0, _txWritten - txElapsed * TxRate); } }
+        public void TxClear() { if (_txClock != null) _txWritten = (long)(txElapsed * TxRate); }
         public void TxStop() { _txClock = null; }
 
         public Color Bg { get { return Color.FromArgb(0x05, 0x0b, 0x13); } }

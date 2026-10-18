@@ -10,17 +10,62 @@ using System;
 
 namespace Kainos.DigiModes.Ftx
 {
-    internal enum FtxMode { FT8, FT4 }
+    // The modes: FT8 and FT4 (Gaussian FSK, this file), JT65, JT9 and WSPR (plain FSK, OtherModes.cs)
+    internal enum FtxMode { FT8, FT4, JT65, JT9, WSPR }
 
     internal static class FtxModes
     {
-        public static double Period(FtxMode m) { return m == FtxMode.FT8 ? 15.0 : 7.5; }
-        public static double SymbolPeriod(FtxMode m) { return m == FtxMode.FT8 ? 0.160 : 0.048; }
+        public static readonly FtxMode[] All = { FtxMode.FT8, FtxMode.FT4, FtxMode.JT65, FtxMode.JT9, FtxMode.WSPR };
+
+        public static bool IsFtx(FtxMode m) { return m == FtxMode.FT8 || m == FtxMode.FT4; }
+        public static bool HasQso(FtxMode m) { return m != FtxMode.WSPR; }                  // WSPR is beacons, no QSOs
+
+        public static double Period(FtxMode m)
+        {
+            switch (m) { case FtxMode.FT8: return 15.0; case FtxMode.FT4: return 7.5; case FtxMode.WSPR: return 120.0; default: return 60.0; }
+        }
+
+        public static double SymbolPeriod(FtxMode m)
+        {
+            switch (m)
+            {
+                case FtxMode.FT8: return 0.160;
+                case FtxMode.FT4: return 0.048;
+                case FtxMode.JT65: return 4096.0 / 11025.0;
+                case FtxMode.JT9: return 6912.0 / 12000.0;
+                default: return 8192.0 / 12000.0;           // WSPR
+            }
+        }
+
         public static double ToneSpacing(FtxMode m) { return 1.0 / SymbolPeriod(m); }
-        public static double Bandwidth(FtxMode m) { return m == FtxMode.FT8 ? 8 * 6.25 : 4 * 20.833; }
+
+        // the signal's width (Hz)
+        public static double Bandwidth(FtxMode m)
+        {
+            switch (m) { case FtxMode.FT8: return 8 * 6.25; case FtxMode.FT4: return 4 * 20.833; case FtxMode.JT65: return 66 * 11025.0 / 4096; case FtxMode.JT9: return 9 * 12000.0 / 6912; default: return 6; }
+        }
+
+        // how long the signal lasts (s)
+        public static double Duration(FtxMode m)
+        {
+            switch (m) { case FtxMode.FT8: return 79 * 0.160; case FtxMode.FT4: return 105 * 0.048; case FtxMode.JT65: return 126 * 4096.0 / 11025; case FtxMode.JT9: return 85 * 6912.0 / 12000; default: return 162 * 8192.0 / 12000; }
+        }
+
         // where in the period the signal starts (DT 0)
-        public static double TxStart(FtxMode m) { return m == FtxMode.FT8 ? 0.5 : 0.5; }
+        public static double TxStart(FtxMode m) { return IsFtx(m) ? 0.5 : 1.0; }
         public static double Bt(FtxMode m) { return m == FtxMode.FT8 ? 2.0 : 1.0; }
+
+        // when the decode runs: once a signal at DT 0 has ended (FT8 / FT4 also again at the period's end)
+        public static double DecodeAt(FtxMode m)
+        {
+            switch (m) { case FtxMode.FT8: return 13.6; case FtxMode.FT4: return 5.9; case FtxMode.WSPR: return 113.5; default: return 50.0; }
+        }
+
+        // the label WSJT-X's UDP messages use for the mode
+        public static string UdpChar(FtxMode m)
+        {
+            switch (m) { case FtxMode.FT8: return "~"; case FtxMode.FT4: return "+"; case FtxMode.JT65: return "#"; case FtxMode.JT9: return "@"; default: return "`"; }
+        }
     }
 
     internal static class FtxModulator

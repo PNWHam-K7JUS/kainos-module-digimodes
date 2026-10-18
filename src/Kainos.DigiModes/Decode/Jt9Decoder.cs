@@ -26,6 +26,8 @@ namespace Kainos.DigiModes.Decode
         public int Freq;                // audio Hz
         public string Message;
         public bool Ap;                 // an a-priori ("a1" ... ) decode: less certain
+        public int Drift;               // WSPR: the drift (Hz)
+        public WsprSpot Wspr;           // WSPR: the spot
         public FtxMode Mode;
 
         public override string ToString()
@@ -37,7 +39,7 @@ namespace Kainos.DigiModes.Decode
 
     internal class Jt9Decoder
     {
-        private static readonly Regex Line = new Regex(@"^\s*(\d{4,6})\s+(-?\d+)\s+(-?\d+\.\d+)\s+(\d+)\s+\S\s+(.*?)\s*$", RegexOptions.Compiled);
+        private static readonly Regex Line = new Regex(@"^\s*(\d{4,6}|\*{4,6})\s+(-?\d+)\s+(-?\d+\.\d+)\s+(\d+)\s+\S\s+(.*?)\s*$", RegexOptions.Compiled);
         private static readonly Regex ApTag = new Regex(@"\s+(a\d+|\?)$", RegexOptions.Compiled);
 
         public string Jt9Exe;
@@ -61,7 +63,7 @@ namespace Kainos.DigiModes.Decode
                 Wav.Write16(wav, samples, 12000);
                 List<string> a = new List<string>
                 {
-                    mode == FtxMode.FT8 ? "-8" : "-5",
+                    mode == FtxMode.FT8 ? "-8" : mode == FtxMode.FT4 ? "-5" : mode == FtxMode.JT65 ? "-6" : "-9",
                     "-d", (depth > 0 ? depth : Depth).ToString(CultureInfo.InvariantCulture),
                     "-f", rxFreq.ToString(CultureInfo.InvariantCulture),
                     "-L", LowHz.ToString(CultureInfo.InvariantCulture),

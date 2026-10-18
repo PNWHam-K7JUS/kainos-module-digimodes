@@ -19,10 +19,10 @@ namespace Kainos.DigiModes.UI
     {
         private readonly IKainosHost _host;
         private readonly DigiEngine _e;
-        private readonly NumericUpDown _level, _lead, _rxlat, _depth, _watchdog, _port;
-        private readonly CheckBox _stop73, _logPrompt, _udpOn, _udpAccept, _psk, _sndMe, _sndDx, _crisp;
+        private readonly NumericUpDown _level, _lead, _rxlat, _depth, _watchdog, _port, _wsprPct;
+        private readonly CheckBox _stop73, _logPrompt, _udpOn, _udpAccept, _psk, _sndMe, _sndDx, _crisp, _wsprNet;
         private readonly TextBox _decoder, _power, _op, _udpHost, _udpId, _pskAntenna, _workLog, _exchange;
-        private readonly ComboBox _contest;
+        private readonly ComboBox _contest, _wsprDbm;
 
         public SettingsForm(IKainosHost host, DigiEngine e)
         {
@@ -96,7 +96,21 @@ namespace Kainos.DigiModes.UI
             Controls.Add(browse);
             y += 26;
             Controls.Add(new Label { Text = "Empty: the decoder that came with the module. In use:\r\n" + (e.Decoder.Jt9Exe ?? "none"), Location = new Point(x0, y), Size = new Size(320, 44), ForeColor = SystemColors.GrayText });
-            int leftBottom = y + 44;
+            y += 50;
+            heading("WSPR");
+            Controls.Add(new Label { Text = "Beacon power (dBm)", Location = new Point(x0, y + 3), AutoSize = true });
+            _wsprDbm = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(x0 + 230, y), Width = 80 };
+            foreach (int p in Ftx.OtherModes.WsprPowers) _wsprDbm.Items.Add(p + (p == 30 ? " (1 W)" : p == 37 ? " (5 W)" : p == 40 ? " (10 W)" : ""));
+            _wsprDbm.SelectedIndex = Math.Max(0, Array.IndexOf(Ftx.OtherModes.WsprPowers, e.WsprDbm));
+            tips.SetToolTip(_wsprDbm, "The power your WSPR beacon reports (your transmitter's output into the antenna). 30 dBm = 1 W, 37 = 5 W.");
+            Controls.Add(_wsprDbm);
+            y += 30;
+            _wsprPct = row("Transmit in this share of periods (%)", 0, 100, e.WsprTxPercent, 5,
+                "With Beacon on, the share of 2-minute periods your WSPR beacon transmits in, chosen at random (WSJT-X's Tx Pct). 20 % is usual.");
+            _wsprNet = check("Upload the spots I hear to WSPRnet", host.GetSetting("wsprnet", "0") == "1",
+                "After each period, the WSPR stations decoded here go to wsprnet.org with your callsign and grid (or a 'listening' report\r\n" +
+                "when there are none), so they appear on its map. Off by default: it publishes your callsign and location.");
+            int leftBottom = y;
 
             // ---- right: logging, and other programs ----
             x0 = 360; y = 14;
@@ -212,6 +226,11 @@ namespace Kainos.DigiModes.UI
             _host.SetSetting("udpid", _udpId.Text.Trim());
             _host.SetSetting("udpaccept", _udpAccept.Checked ? "1" : "0");
             _host.SetSetting("worklog", _workLog.Text.Trim());
+            _e.WsprDbm = Ftx.OtherModes.WsprPowers[Math.Max(0, _wsprDbm.SelectedIndex)];
+            _e.WsprTxPercent = (int)_wsprPct.Value;
+            _host.SetSetting("wsprdbm", _e.WsprDbm.ToString());
+            _host.SetSetting("wsprpct", _e.WsprTxPercent.ToString());
+            _host.SetSetting("wsprnet", _wsprNet.Checked ? "1" : "0");
             Qso.Contest c = Qso.Contest.None;
             foreach (Qso.Contest k in Enum.GetValues(typeof(Qso.Contest))) if (Qso.QsoEngine.Name(k) == (string)_contest.SelectedItem) c = k;
             _host.SetSetting("contest", ((int)c).ToString());

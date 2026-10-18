@@ -1,4 +1,4 @@
-/*  SlotRecorder.cs
+﻿/*  SlotRecorder.cs
 
 The receiver's audio at 12 kHz (what jt9 decodes), kept for the last minute with each sample's UTC time, so a
 whole FT8 / FT4 period can be cut out once it has ended.
@@ -89,7 +89,7 @@ namespace Kainos.DigiModes.Decode
 
     internal class SlotRecorder
     {
-        private const int Capacity = 12000 * 60;
+        private const int Capacity = 12000 * 130;      // WSPR's two-minute periods, with room to spare
         private readonly float[] _ring = new float[Capacity];
         private long _written;                  // samples written since the start (12 kHz)
         private readonly List<KeyValuePair<DateTime, double>> _offsets = new List<KeyValuePair<DateTime, double>>();

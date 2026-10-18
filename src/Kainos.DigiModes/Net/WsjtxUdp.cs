@@ -238,6 +238,23 @@ namespace Kainos.DigiModes.Net
             send(w);
         }
 
+        // a WSPR spot (WSJT-X's WSPRDecode message)
+        public void WsprDecode(bool isNew, DateTime slotUtc, int snr, double dt, ulong hz, int drift, string call, string grid, int dbm)
+        {
+            QWriter w = header(WsjtxType.WsprDecode);
+            w.Bool(isNew);
+            w.QTime(slotUtc);
+            w.I32(snr);
+            w.Double(dt);
+            w.U64(hz);
+            w.I32(drift);
+            w.Utf8(call);
+            w.Utf8(grid);
+            w.I32(dbm);
+            w.Bool(false);          // off air: no
+            send(w);
+        }
+
         public void Clear()
         {
             QWriter w = header(WsjtxType.Clear);
