@@ -248,18 +248,47 @@ namespace Kainos.DigiModes.UI
             _e.Qso.Logged += q => _host.BeginInvoke(() => logged(q));
         }
 
-        private void setMode(FtxMode m)
+        internal void setMode(FtxMode m)
         {
             if (_e.Mode == m) return;
+            FtxMode old = _e.Mode;
+            double vfo = _host.Radio.VfoHz(_e.Rx);
             if (_e.Transmitting) _e.Halt();
             _e.TxEnabled = false;           // a new mode starts with transmitting off
             _e.Mode = m;
             lock (_e.Qso) _e.Qso.Jt = m == FtxMode.JT65 || m == FtxMode.JT9;
             // WSPR signals live in 1400 - 1600 Hz
             if (m == FtxMode.WSPR && (_e.TxFreq < 1400 || _e.TxFreq > 1595)) { _e.TxFreq = 1500; _e.RxFreq = 1500; }
-            _activity.Separator("");
+            string band = tuneForMode(old, m, vfo);
+            _activity.Separator(band ?? "");
             save();
             refreshAll();
+        }
+
+        // the new mode's frequency on the band the radio is on: the Band menu entry whose old-mode frequency it's at
+        // (so a band of your own, a DXpedition's, follows too), else the one named for the band it's in. Returns the
+        // band's name when it tuned
+        private string tuneForMode(FtxMode old, FtxMode m, double vfo)
+        {
+            Bands.Entry e = Bands.Menu.FirstOrDefault(x => x.Freq(old) > 0 && Math.Abs(x.Freq(old) - vfo) <= 3000);
+            if (e == null)
+            {
+                Bands.Band b = Bands.Of(vfo);
+                if (b != null) e = Bands.Menu.FirstOrDefault(x => string.Equals(x.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+            }
+            if (e == null) return null;                 // not on a band in the list: stay where it is
+            double f = e.Freq(m);
+            if (f <= 0)
+            {
+                status("No " + m + " frequency for " + e.Name + " in the band list (Band > Edit band frequencies): staying on " +
+                       (vfo / 1e6).ToString("0.0000", CultureInfo.InvariantCulture) + " MHz");
+                return null;
+            }
+            int rx = _e.Rx;
+            _host.Radio.SetMode(rx, "DIGU");
+            if (Math.Abs(f - vfo) > 1) _host.Radio.TuneVfo(rx, f);
+            status("Tuned to " + (f / 1e6).ToString("0.0000", CultureInfo.InvariantCulture) + " MHz for " + m + " on " + e.Name);
+            return e.Name;
         }
 
         private void buildBandMenu()

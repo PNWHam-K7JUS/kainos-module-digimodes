@@ -682,6 +682,21 @@ namespace Kainos.DigiModes.SelfTest
                             check(golden > 5, "callsign drawn on its trace in the waterfall (" + golden + " gold pixels at row 20, 500 Hz)");
                         }
 
+                        // changing mode tunes to that mode's frequency on the same band (or stays where there's none)
+                        stage = "mode tuning";
+                        UI.DigiPane pane = all(w).OfType<UI.DigiPane>().First();
+                        host.Vfo = 14074000; host.ModeName = "USB";
+                        pane.setMode(FtxMode.FT4); double f4 = host.Vfo; string md = host.ModeName;
+                        pane.setMode(FtxMode.WSPR); double fw = host.Vfo;
+                        pane.setMode(FtxMode.FT2); double f2 = host.Vfo;
+                        pane.setMode(FtxMode.JT65); double fj = host.Vfo;
+                        pane.setMode(FtxMode.FT8); double f8 = host.Vfo;
+                        host.Vfo = 1840000;
+                        pane.setMode(FtxMode.FT4); double f160 = host.Vfo;
+                        pane.setMode(FtxMode.FT8);
+                        check(f4 == 14080000 && md == "DIGU" && fw == 14095600 && f2 == 14084000 && fj == 14076000 && f8 == 14074000 && f160 == 1840000,
+                            "changing mode tunes on the same band: FT4 " + f4 + ", WSPR " + fw + ", FT2 " + f2 + ", JT65 " + fj + ", FT8 " + f8 + "; FT4 on 160 m stays " + f160);
+
                         // Tune: keys the radio and sends the tone; off un-keys it
                         stage = "tune";
                         DigiEngine teng = new DigiEngine(host) { TxFreq = 1500 };
