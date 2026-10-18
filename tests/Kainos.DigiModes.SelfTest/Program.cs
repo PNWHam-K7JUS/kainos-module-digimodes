@@ -151,6 +151,63 @@ namespace Kainos.DigiModes.SelfTest
                 check(p.Count == 2 && p[0].Ap && p[0].Message == "K7JUS K1ABC FN42" && p[1].Snr == -3 && p[1].Freq == 456, "jt9 output parsed");
             }
 
+            // 16. Hound (DXpedition): the QSO with a Fox, his two-part messages, frequencies; and jt9 resolving the Fox's
+            // hashed call when it's told who we're working
+            {
+                Func<string, int, int, DecodeLine> d = (m, s, f) => new DecodeLine { Message = m, Snr = s, Freq = f, Mode = FtxMode.FT8 };
+                QsoEngine h = new QsoEngine { MyCall = "K7JUS", MyGrid = "CN87", Activity = Contest.Hound };
+                List<QsoRecord> hl = new List<QsoRecord>();
+                h.Logged += r => hl.Add(r);
+                h.Answer(d("CQ KH1/KH7Z", -9, 420));
+                string tx1 = h.NextMessage;
+                h.Sequence(new[] { d("W9XYZ RR73; K7JUS <KH1/KH7Z> -17", -11, 480) }, tx1);
+                string tx3 = h.NextMessage;
+                int at = h.FoxCalledAt;
+                h.Sequence(new[] { d("K7JUS RR73; G4AAA <KH1/KH7Z> -09", -10, 480) }, tx3);
+                bool flow = tx1 == "KH7Z K7JUS CN87" && tx3 == "KH7Z K7JUS R-11" && at == 480 && hl.Count == 1 && hl[0].Call == "KH1/KH7Z" && hl[0].RstRcvd == "-17" && h.Done;
+
+                // the plain form: "K7JUS KH7Z -13", then "K7JUS KH7Z RR73"
+                QsoEngine h2 = new QsoEngine { MyCall = "K7JUS", MyGrid = "CN87", Activity = Contest.Hound, HisCall = "KH1/KH7Z", Next = 1 };
+                h2.Sequence(new[] { d("K7JUS KH7Z -13", -8, 360) }, null);
+                bool plain = h2.Next == 3 && h2.FoxCalledAt == 360;
+                h2.Sequence(new[] { d("K7JUS KH7Z RR73", -8, 360) }, null);
+                plain &= h2.Done;
+
+                // frequencies: calls at 1000 Hz or above; R+report where Fox called, then 300 Hz away, then back
+                DigiEngine he = new DigiEngine(new FakeHost(bin, Path.Combine(work, "hound"))) { TxFreq = 800 };
+                he.Qso.Activity = Contest.Hound; he.Qso.HisCall = "KH1/KH7Z"; he.Qso.Next = 1;
+                int c1 = he.houndFreq();
+                he.Qso.Next = 3; he.Qso.FoxCalledAt = 420;
+                int r1 = he.houndFreq(), r2 = he.houndFreq(), r3 = he.houndFreq();
+                bool freqs = c1 == 1000 && r1 == 420 && r2 == 720 && r3 == 420;
+
+                string why;
+                PackedMessage pa = Pack77.Pack(ft8code, tx1, out why), pb = Pack77.Pack(ft8code, tx3, out why);
+                bool packs = pa != null && pa.Decoded == tx1 && pb != null && pb.Decoded == tx3;
+
+                // a Fox's two-part message on the air: decoded, with <KH1/KH7Z> resolved when jt9 knows we're working him
+                string fox = "W9XYZ RR73; K7JUS <KH1/KH7Z> -17";
+                PackedMessage pf = Pack77.Pack(ft8code, fox, out why);
+                bool air = false; string got = why ?? "";
+                if (pf != null)
+                {
+                    float[] wave = FtxModulator.Synthesize(FtxMode.FT8, FtxEncoder.Ft8Tones(FtxEncoder.PayloadFromBits(pf.Bits77)), 480, 12000);
+                    float[] slot = new float[180000];
+                    for (int i = 0; i < slot.Length; i++) slot[i] = (float)(gauss(rnd) * 0.02 + (i >= 6000 && i - 6000 < wave.Length ? wave[i - 6000] * 0.1 : 0));
+                    List<DecodeLine> res = dec.Decode(FtxMode.FT8, new DateTime(2026, 10, 16, 12, 2, 0, DateTimeKind.Utc), slot, 480, "K7JUS", "CN87", "KH1/KH7Z", out why);
+                    got = string.Join(" | ", res.Select(r => r.Message));
+                    DecodeLine heard = res.FirstOrDefault(r => r.Message.StartsWith("W9XYZ RR73; K7JUS"));
+                    // jt9 shows the hash as <...> (it can't resolve it in this mode): the sequencer must still take it as the Fox
+                    QsoEngine h3 = new QsoEngine { MyCall = "K7JUS", MyGrid = "CN87", Activity = Contest.Hound, HisCall = "KH1/KH7Z", Next = 1 };
+                    air = heard != null && h3.Sequence(new[] { heard }, null) && h3.Next == 3 && h3.FoxCalledAt == heard.Freq;
+                }
+                check(flow, "Hound: call the Fox (base call), his report in a two-part message, R+report, his RR73 logs it");
+                check(plain, "Hound: Fox's plain report and RR73");
+                check(freqs, "Hound frequencies: call at 1000 Hz or above (" + c1 + "), R+report at " + r1 + ", then " + r2 + ", then " + r3);
+                check(packs, "Hound messages pack exactly");
+                check(air, "a Fox's two-part message off the air (jt9: " + got + ") moves the Hound to R+report");
+            }
+
             // 14. the Band menu list: parse, format, mistakes caught
             {
                 string why;

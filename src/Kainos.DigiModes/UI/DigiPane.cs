@@ -228,8 +228,8 @@ namespace Kainos.DigiModes.UI
             _e.SpectrumLine += (line, t) => _host.BeginInvoke(() => _strip.AddLine(line, t));
             _e.TxStarted += (slot, msg) => _host.BeginInvoke(() =>
             {
-                string line = slot.ToString("HHmmss") + "  Tx " + _e.TxFreq.ToString().PadLeft(4) + "  " + msg;
-                allTxt(new[] { DigiPane.line(slot, _host.Radio.VfoHz(_host.Radio.TxReceiver), "Tx", _e.Mode, 0, 0, _e.TxFreq, msg) });
+                string line = slot.ToString("HHmmss") + "  Tx " + _e.LastTxFreq.ToString().PadLeft(4) + "  " + msg;
+                allTxt(new[] { DigiPane.line(slot, _host.Radio.VfoHz(_host.Radio.TxReceiver), "Tx", _e.Mode, 0, 0, _e.LastTxFreq, msg) });
                 _rxList.Add(new DecodeRow { Text = line, Kind = RowKind.Mine });
             });
             _e.Status += s => _host.BeginInvoke(() => status(s));

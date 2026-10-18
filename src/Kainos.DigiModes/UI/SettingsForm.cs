@@ -149,7 +149,7 @@ namespace Kainos.DigiModes.UI
             heading("Contest");
             Controls.Add(new Label { Text = "Activity", Location = new Point(x0, y + 3), AutoSize = true });
             _contest = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(x0 + 150, y), Width = 180 };
-            foreach (Qso.Contest c in new[] { Qso.Contest.None, Qso.Contest.FieldDay, Qso.Contest.RttyRoundup, Qso.Contest.NaVhf, Qso.Contest.WwDigi }) _contest.Items.Add(Qso.QsoEngine.Name(c));
+            foreach (Qso.Contest c in new[] { Qso.Contest.None, Qso.Contest.FieldDay, Qso.Contest.RttyRoundup, Qso.Contest.NaVhf, Qso.Contest.WwDigi, Qso.Contest.Hound }) _contest.Items.Add(Qso.QsoEngine.Name(c));
             int ci;
             int.TryParse(host.GetSetting("contest", "0"), out ci);
             _contest.SelectedItem = Qso.QsoEngine.Name((Qso.Contest)ci);
@@ -168,6 +168,7 @@ namespace Kainos.DigiModes.UI
                 _exchange.Enabled = n == Qso.QsoEngine.Name(Qso.Contest.FieldDay) || n == Qso.QsoEngine.Name(Qso.Contest.RttyRoundup);
                 exHint.Text = n == Qso.QsoEngine.Name(Qso.Contest.FieldDay) ? "Field Day: your class and section, e.g. 1D WWA" :
                               n == Qso.QsoEngine.Name(Qso.Contest.RttyRoundup) ? "Roundup: your state or province (e.g. WA); empty outside the US and Canada for serial numbers" :
+                              n == Qso.QsoEngine.Name(Qso.Contest.Hound) ? "Working a DXpedition in Fox / Hound mode: call at 1000 Hz or above; FT8 only" :
                               n == Qso.QsoEngine.Name(Qso.Contest.None) ? "" : "The exchange is your grid square";
             };
             _contest.SelectedIndexChanged += (s, a) => hint();

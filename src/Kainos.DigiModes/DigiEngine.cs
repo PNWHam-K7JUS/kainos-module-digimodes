@@ -262,6 +262,8 @@ namespace Kainos.DigiModes
                 bool changed = Qso.Sequence(fresh, sent);
                 // the QSO is over (73 sent or received): stop, as WSJT-X does; calling CQ again starts afresh
                 if (Qso.Done && StopAfter73 && TxEnabled) { TxEnabled = false; changed = true; }
+                // a Hound sends R+report when Fox calls him, as WSJT-X does, if he called Fox in the last 2 minutes
+                if (Qso.Hound && Qso.Next == 3 && !Qso.Done && !TxEnabled && (Now() - _lastHoundTx).TotalMinutes < 2) { TxEnabled = true; changed = true; }
                 if (changed) Changed?.Invoke();
             }
         }
@@ -313,6 +315,27 @@ namespace Kainos.DigiModes
             return true;
         }
 
+        // ---- Hound frequencies (FT8 DXpedition Mode): calls at 1000 Hz or above; R+report on the frequency Fox called
+        // me on, 300 Hz away on each repeat ----
+
+        public int LastTxFreq { get; private set; }
+        private DateTime _lastHoundTx = DateTime.MinValue;
+        private int _houndRCount, _houndRFor;
+
+        internal int houndFreq()
+        {
+            int called;
+            lock (Qso)
+            {
+                if (Qso.Next != 3 || Qso.FoxCalledAt <= 0) { _houndRCount = 0; return Math.Max(1000, TxFreq); }
+                called = Qso.FoxCalledAt;
+            }
+            if (called != _houndRFor) { _houndRFor = called; _houndRCount = 0; }
+            int f = _houndRCount % 2 == 0 ? called : called + (called < 600 ? 300 : -300);
+            _houndRCount++;
+            return f;
+        }
+
         private void txTick()
         {
             DateTime now = Now();
@@ -321,10 +344,12 @@ namespace Kainos.DigiModes
             if (_tuneReq) { startTune(now); return; }
             if (!TxEnabled) return;
 
-            if ((now - _lastActivity).TotalMinutes > WatchdogMinutes)
+            // a Hound must press Enable Tx at least every 2 minutes (as WSJT-X requires)
+            int watchdog = Qso.Hound ? 2 : WatchdogMinutes;
+            if ((now - _lastActivity).TotalMinutes > watchdog)
             {
                 TxEnabled = false;
-                Status?.Invoke("Transmit stopped: nothing from you for " + WatchdogMinutes + " minutes (the Tx watchdog)");
+                Status?.Invoke("Transmit stopped: nothing from you for " + watchdog + " minutes (the Tx watchdog)");
                 Changed?.Invoke();
                 return;
             }
@@ -334,7 +359,8 @@ namespace Kainos.DigiModes
             double t = SlotRecorder.Seconds(now);
             double s = Math.Floor(t / p) * p;
             long k = (long)Math.Round(s / p);
-            bool mine = (k & 1) == (TxSecond ? 1 : 0);
+            bool hound = Qso.Hound;
+            bool mine = (k & 1) == (TxSecond || hound ? 1 : 0);       // a Hound transmits in the second periods (Fox has the first)
             double into = t - s;
             DateTime slot = new DateTime((long)Math.Round(s * 1e7), DateTimeKind.Utc);
             if (!mine || slot == _lastTxSlot || into > 2.0) return;      // not ours, already sent, or too late to start
@@ -343,6 +369,7 @@ namespace Kainos.DigiModes
             bool heard = _sequencedSlot >= prevSlot;
             if (!heard && _tapOk && into < maxWait(mode)) return;
             if (!_host.Radio.PowerOn) { Status?.Invoke("The radio is off"); TxEnabled = false; Changed?.Invoke(); return; }
+            if (hound && mode != FtxMode.FT8) { Status?.Invoke("Hound (DXpedition) mode is FT8 only"); TxEnabled = false; Changed?.Invoke(); return; }
             string m = _host.Radio.Mode(_host.Radio.TxReceiver);
             if (m != "DIGU" && m != "USB") { Status?.Invoke("Transmit needs DIGU (or USB) on the transmitting VFO"); TxEnabled = false; Changed?.Invoke(); return; }
 
@@ -357,7 +384,8 @@ namespace Kainos.DigiModes
             if (rate <= 0) { Status?.Invoke("No transmit audio stream"); return; }
             byte[] payload = FtxEncoder.PayloadFromBits(pm.Bits77);
             byte[] tones = mode == FtxMode.FT8 ? FtxEncoder.Ft8Tones(payload) : FtxEncoder.Ft4Tones(payload);
-            float[] wave = FtxModulator.Synthesize(mode, tones, TxFreq, rate);
+            int txf = hound ? houndFreq() : TxFreq;
+            float[] wave = FtxModulator.Synthesize(mode, tones, txf, rate);
             float amp = (float)Math.Pow(10, LevelDb / 20.0);
             for (int i = 0; i < wave.Length; i++) wave[i] *= amp;
 
@@ -382,7 +410,9 @@ namespace Kainos.DigiModes
             _moxAskedAt = now;
             _host.Audio.TxStart();
             _host.BeginInvoke(() => _host.Radio.SetMox(true));
-            _host.Log("TX " + slot.ToString("HHmmss.f") + " " + mode + " " + TxFreq + " Hz: " + pm.Message);
+            _host.Log("TX " + slot.ToString("HHmmss.f") + " " + mode + " " + txf + " Hz: " + pm.Message);
+            LastTxFreq = txf;
+            if (hound) _lastHoundTx = now;
             TxStarted?.Invoke(slot, pm.Message);
             Changed?.Invoke();
             feedTx(now);

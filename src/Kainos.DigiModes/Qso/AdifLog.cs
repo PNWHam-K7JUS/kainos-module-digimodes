@@ -59,7 +59,7 @@ namespace Kainos.DigiModes.Qso
         // a contest QSO: the contest, both exchanges, and the received one in its own ADIF fields
         private static void contest(StringBuilder sb, QsoRecord q)
         {
-            if (q.Contest == Contest.None) return;
+            if (q.Contest == Contest.None || q.Contest == Contest.Hound) return;
             string id = q.Contest == Contest.FieldDay ? "ARRL-FD" : q.Contest == Contest.RttyRoundup ? "ARRL-RTTY" :
                         q.Contest == Contest.WwDigi ? "WW-DIGI" : "ARRL-VHF";
             f(sb, "CONTEST_ID", id);
