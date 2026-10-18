@@ -63,7 +63,7 @@ namespace Kainos.DigiModes.Decode
                 Wav.Write16(wav, samples, 12000);
                 List<string> a = new List<string>
                 {
-                    mode == FtxMode.FT8 ? "-8" : mode == FtxMode.FT4 ? "-5" : mode == FtxMode.JT65 ? "-6" : "-9",
+                    mode == FtxMode.FT8 ? "-8" : mode == FtxMode.FT4 ? "-5" : mode == FtxMode.FT2 ? "--ft2" : mode == FtxMode.JT65 ? "-6" : "-9",      // FT2: only the long form works in jt9 3.1.0
                     "-d", (depth > 0 ? depth : Depth).ToString(CultureInfo.InvariantCulture),
                     "-f", rxFreq.ToString(CultureInfo.InvariantCulture),
                     "-L", LowHz.ToString(CultureInfo.InvariantCulture),

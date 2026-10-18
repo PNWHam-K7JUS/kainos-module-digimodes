@@ -283,7 +283,7 @@ namespace Kainos.DigiModes
 
         // how long into our period transmitting waits for the decode of the period before it (so the reply answers it),
         // before starting anyway with what it has
-        private static double maxWait(FtxMode m) { return m == FtxMode.FT8 ? 1.2 : m == FtxMode.FT4 ? 0.6 : 2.0; }
+        private static double maxWait(FtxMode m) { return m == FtxMode.FT8 ? 1.2 : m == FtxMode.FT4 ? 0.6 : m == FtxMode.FT2 ? 0.3 : 2.0; }
 
         // ---- transmitting ----
 

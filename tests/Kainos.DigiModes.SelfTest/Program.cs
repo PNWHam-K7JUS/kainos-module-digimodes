@@ -57,9 +57,9 @@ namespace Kainos.DigiModes.SelfTest
             // 2. over the air (simulated): FT8 and FT4 decoded by jt9, at several levels
             Jt9Decoder dec = new Jt9Decoder { Jt9Exe = jt9, WorkFolder = work, Depth = 3 };
             Random rnd = new Random(7);
-            foreach (FtxMode mode in new[] { FtxMode.FT8, FtxMode.FT4 })
+            foreach (FtxMode mode in new[] { FtxMode.FT8, FtxMode.FT4, FtxMode.FT2 })
             {
-                foreach (double snr in new[] { 0.0, -12.0, mode == FtxMode.FT8 ? -19.0 : -15.0 })
+                foreach (double snr in mode == FtxMode.FT2 ? new[] { 0.0, -8.0, -11.0 } : new[] { 0.0, -12.0, mode == FtxMode.FT8 ? -19.0 : -15.0 })
                 {
                     string m = mode == FtxMode.FT8 ? "CQ K7JUS CN87" : "K1ABC K7JUS R-12";
                     string why;
@@ -561,7 +561,7 @@ namespace Kainos.DigiModes.SelfTest
             // (in real time, with decoding in the background as in Kainos; FT8 and FT4 side by side, about 2 minutes)
             List<KeyValuePair<bool, string>> qsoResults = new List<KeyValuePair<bool, string>>();
             bool quick = args.Contains("--quick");            // skips the real-time QSO (2 minutes)
-            System.Threading.Tasks.Parallel.ForEach(quick ? new FtxMode[0] : new[] { FtxMode.FT8, FtxMode.FT4 }, mode =>
+            System.Threading.Tasks.Parallel.ForEach(quick ? new FtxMode[0] : new[] { FtxMode.FT8, FtxMode.FT4, FtxMode.FT2 }, mode =>
             {
                 double p = FtxModes.Period(mode);
                 DateTime t0 = new DateTime(2026, 10, 16, 12, 0, 0, DateTimeKind.Utc);
