@@ -675,6 +675,20 @@ namespace Kainos.DigiModes.SelfTest
                             System.Drawing.Color hot = shot.GetPixel((int)(1515.0 / 3000 * (strip.Width - 1)), yy), cold = shot.GetPixel((int)(500.0 / 3000 * (strip.Width - 1)) + 3, yy);
                             check(hot.GetBrightness() > cold.GetBrightness() + 0.3f, "waterfall shows a signal where it is (" + hot + " vs " + cold + ")");
                         }
+                        // a dashed line where a period starts: those 60 lines (about 10 s) cross a 15 s boundary, so one row
+                        // well away from the signal has many light-blue pixels (GitHub #45)
+                        using (System.Drawing.Bitmap shot = new System.Drawing.Bitmap(strip.Width, strip.Height))
+                        {
+                            strip.DrawToBitmap(shot, new System.Drawing.Rectangle(0, 0, strip.Width, strip.Height));
+                            int x0 = strip.Width / 10, x1 = strip.Width * 4 / 10, best = 0;
+                            for (int yy = 0; yy < strip.Height; yy++)
+                            {
+                                int n = 0;
+                                for (int xx = x0; xx < x1; xx++) { System.Drawing.Color px = shot.GetPixel(xx, yy); if (px.B > 110 && px.B > px.R + 40 && px.G > 70) n++; }
+                                best = Math.Max(best, n);
+                            }
+                            check(best > (x1 - x0) / 4, "a line across the waterfall where the period starts (" + best + " of " + (x1 - x0) + " pixels in its row)");
+                        }
                         // a callsign on its trace: a decode at 500 Hz whose signal was in the middle of those lines is labelled there
                         double lastT = 1000 + 59 * SpectrumMaker.LineSeconds, midT = lastT - 20 * SpectrumMaker.LineSeconds;
                         double half = 79 * 0.160 / 2 + FtxModes.TxStart(FtxMode.FT8);

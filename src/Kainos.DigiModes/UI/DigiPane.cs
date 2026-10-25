@@ -539,6 +539,7 @@ namespace Kainos.DigiModes.UI
             _strip.Rx = _e.RxFreq;
             _strip.Tx = _e.TxFreq;
             _strip.BandwidthHz = (int)FtxModes.Bandwidth(_e.Mode);
+            _strip.PeriodSeconds = FtxModes.Period(_e.Mode);
             _strip.Invalidate();
             refreshQso();
         }

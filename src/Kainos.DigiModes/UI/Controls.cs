@@ -323,6 +323,7 @@ namespace Kainos.DigiModes.UI
         private readonly IKainosTheme _t;
         public int Rx = 1500, Tx = 1500, BandwidthHz = 50;
         public int MaxHz = 3000;
+        public double PeriodSeconds = 15;       // a line across the waterfall where each period starts (GitHub #45)
         private List<DecodeLine> _last = new List<DecodeLine>();
         private readonly ToolTip _tip = new ToolTip { InitialDelay = 200, ReshowDelay = 100, ShowAlways = true };     // always: in a KainosCrispHost its window is never the active one
         private string _tipText = "";
@@ -496,6 +497,27 @@ namespace Kainos.DigiModes.UI
             }
             g.PixelOffsetMode = PixelOffsetMode.Default;
             g.InterpolationMode = InterpolationMode.Default;
+
+            // where each period starts (between the rows either side of it), with its UTC time at the left
+            if (PeriodSeconds > 0)
+            using (Pen pen = new Pen(Color.FromArgb(110, _t.Ice), 1) { DashStyle = DashStyle.Dash })
+            using (Font tf = _t.Font(F(8.5f), false))
+            using (Brush tb = new SolidBrush(Color.FromArgb(190, _t.Ice)))
+            using (Brush bg = new SolidBrush(Color.FromArgb(150, _t.Bg)))
+            {
+                for (int row = 0; row + 1 < rows; row++)
+                {
+                    double newer = Math.Floor(_rowT[row] / PeriodSeconds), older = Math.Floor(_rowT[row + 1] / PeriodSeconds);
+                    if (newer == older || _rowT[row + 1] <= 0) continue;
+                    float ly = r.Y + row + 0.5f;
+                    g.DrawLine(pen, r.X, ly, r.Right, ly);
+                    string at = DateTime.MinValue.AddSeconds(newer * PeriodSeconds % 86400).ToString("HH:mm:ss");
+                    SizeF sz = g.MeasureString(at, tf);
+                    if (ly + 1 + sz.Height > r.Bottom) continue;
+                    g.FillRectangle(bg, r.X + 2 * _k, ly + 1, sz.Width, sz.Height);
+                    g.DrawString(at, tf, tb, r.X + 2 * _k, ly + 1);
+                }
+            }
 
             // the callsigns on their traces: a small tag at the signal's left edge, at the row of its middle
             using (Font lf = _t.Font(F(9.5f), true))
