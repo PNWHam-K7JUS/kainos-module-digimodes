@@ -40,7 +40,8 @@ namespace Kainos.DigiModes.SelfTest
 
         public IKainosMenuItem AddMenuItem(string text, string toolTip, Action click) { FakeMenu m = new FakeMenu { Text = text, Click = click }; Menus.Add(m); return m; }
         public IKainosPane CreatePane(string title, Control content) { FakePane p = new FakePane(this, content); Panes.Add(p); return p; }
-        public void SetMarkers(int rx, KainosMarker[] markers) { }
+        public readonly KainosMarker[][] Markers = new KainosMarker[2][];
+        public void SetMarkers(int rx, KainosMarker[] markers) { Markers[rx] = markers; }
         public string GetSetting(string key, string fallback) { string v; return Settings.TryGetValue(key, out v) ? v : fallback; }
         public void SetSetting(string key, string value) { Settings[key] = value; }
         public void Log(string message) { lock (LogLines) LogLines.Add(message); }

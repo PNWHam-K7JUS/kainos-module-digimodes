@@ -102,6 +102,7 @@ namespace Kainos.DigiModes
         private void open()
         {
             _pane.Open();
+            _view.ShowMarkers = true;
             _engine.Relisten();
             _engine.Start();
             _udp.Apply();
@@ -116,6 +117,7 @@ namespace Kainos.DigiModes
             _udp.Dispose();
             _pane.Close();
             applyPsk();         // sends what's gathered, then stops
+            _view.ShowMarkers = false;
             _host.SetMarkers(0, null);
             _host.SetMarkers(1, null);
             _menu.Checked = false;

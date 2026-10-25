@@ -728,9 +728,12 @@ namespace Kainos.DigiModes.SelfTest
                                 .Select(c => c.GetType().Name + " '" + c.Text + "' " + c.Bounds + " in " + c.Parent.ClientSize).ToList();
                             check(outside.Count == 0, "pane fits at " + width + " x 236" + (outside.Count > 0 ? ": " + string.Join("; ", outside.Take(4)) : ""));
                         }
+                        bool markedOpen = host.Markers[0] != null && host.Markers[0].Length == 2;
                         stage = "close";
                         host.Menus[0].Click();
-                        pump(200);
+                        pump(800);      // the pane's timer keeps ticking (every 200 ms) after it's closed
+                        check(markedOpen && host.Markers[0] == null && host.Markers[1] == null,
+                            "RX / TX markers on the panadapter while open, gone once closed (GitHub #42)");
                         stage = "stop";
                         mod.Stop();
                         mod.Dispose();

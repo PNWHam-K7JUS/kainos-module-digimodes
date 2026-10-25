@@ -486,6 +486,10 @@ namespace Kainos.DigiModes.UI
 
         private void status(string s) { _statusText = s ?? ""; _statusAt = DateTime.UtcNow; _status.Text = _statusText; }
 
+        // set by the module while its window is open. The timer runs for the pane's whole life, so the markers are only
+        // drawn while it's open: before, the next tick put them back after closing (GitHub #42).
+        public bool ShowMarkers { get; set; }
+
         private void tick()
         {
             DateTime now = DateTime.UtcNow;
@@ -504,6 +508,7 @@ namespace Kainos.DigiModes.UI
                                    (_host.GetSetting("wsprnet", "0") == "1" ? ", uploading to WSPRnet" : "") :
                                _e.Qso.Activity != Contest.None ? "Contest: " + QsoEngine.Name(_e.Qso.Activity) + (_e.Qso.MyExch.Length > 0 ? " (sending " + _e.Qso.MyExch + ")" : "") : "";
             // the markers on the panadapter: RX (gold) and TX (red) at their audio frequencies above the VFO
+            if (!ShowMarkers) return;
             int rx = _e.Rx;
             string m = _host.Radio.Mode(rx);
             int sign = m == "LSB" || m == "DIGL" ? -1 : 1;
