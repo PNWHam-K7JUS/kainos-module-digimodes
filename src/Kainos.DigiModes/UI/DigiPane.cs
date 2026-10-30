@@ -86,6 +86,10 @@ namespace Kainos.DigiModes.UI
             // filters: CQ only (and calls to me), hide stations already worked on this band
             _activity.Chips.Add(new DecodeList.Chip { Text = "CQ only", On = host.GetSetting("fcq", "0") == "1", Toggled = on => { _host.SetSetting("fcq", on ? "1" : "0"); applyFilter(); } });
             _activity.Chips.Add(new DecodeList.Chip { Text = "Hide worked", On = host.GetSetting("fhide", "0") == "1", Toggled = on => { _host.SetSetting("fhide", on ? "1" : "0"); applyFilter(); } });
+            // and by continent (GitHub Kainos #44): the chip opens a tick list; none ticked shows them all
+            _contChip = new DecodeList.Chip { Pressed = continentMenu };
+            _activity.Chips.Add(_contChip);
+            contChipText();
             _rxList = new DecodeList(_t) { Title = "RX FREQUENCY" };
             Controls.Add(_activity);
             Controls.Add(_rxList);
@@ -364,10 +368,11 @@ namespace Kainos.DigiModes.UI
                 string[] w = d.Message.Split(' ');
                 RowKind k = my.Length > 0 && w.Contains(my) ? RowKind.ToMe : d.Message.StartsWith("CQ ") ? RowKind.Cq : RowKind.Normal;
                 WorkedInfo wi = Worked.Classify(d.Message, bandName);
-                DecodeRow row = new DecodeRow { Decode = d, Text = d.ToString(), Kind = k, Mark = wi != null ? wi.Mark : WorkedMark.None, Note = wi != null ? wi.Country : null };
+                DecodeRow row = new DecodeRow { Decode = d, Text = d.ToString(), Kind = k, Mark = wi != null ? wi.Mark : WorkedMark.None, Note = wi != null ? wi.Country : null,
+                                                Continent = wi != null && wi.Entity != null ? wi.Entity.Continent : null };
                 _activity.Add(row);
                 bool mine = k == RowKind.ToMe || (his.Length > 0 && w.Length > 1 && w[1] == his) || Math.Abs(d.Freq - _e.RxFreq) <= 10;
-                if (mine) _rxList.Add(new DecodeRow { Decode = d, Text = d.ToString(), Kind = k, Mark = row.Mark, Note = row.Note });
+                if (mine) _rxList.Add(new DecodeRow { Decode = d, Text = d.ToString(), Kind = k, Mark = row.Mark, Note = row.Note, Continent = row.Continent });
                 alertMe |= k == RowKind.ToMe;
                 alertDx |= k == RowKind.Cq && row.Mark == WorkedMark.NewDxcc;
             }
@@ -418,8 +423,78 @@ namespace Kainos.DigiModes.UI
         private void applyFilter()
         {
             bool cq = _host.GetSetting("fcq", "0") == "1", hide = _host.GetSetting("fhide", "0") == "1";
-            _activity.Filter = !cq && !hide ? (Func<DecodeRow, bool>)null :
-                r => (!cq || r.Kind == RowKind.Cq || r.Kind == RowKind.ToMe) && (!hide || r.Mark != WorkedMark.WorkedBand || r.Kind == RowKind.ToMe);
+            HashSet<string> conts = Continents(_host.GetSetting("fcont", ""));
+            _activity.Filter = !cq && !hide && conts.Count == 0 ? (Func<DecodeRow, bool>)null :
+                r => (!cq || r.Kind == RowKind.Cq || r.Kind == RowKind.ToMe) && (!hide || r.Mark != WorkedMark.WorkedBand || r.Kind == RowKind.ToMe)
+                     && ContinentShows(r, conts);
+        }
+
+        // ---- the continent filter (GitHub Kainos #44) ----
+
+        internal static readonly string[] ContinentCodes = { "NA", "SA", "EU", "AF", "AS", "OC", "AN" };
+        private static readonly string[] ContinentNames = { "North America", "South America", "Europe", "Africa", "Asia", "Oceania", "Antarctica" };
+        private DecodeList.Chip _contChip;
+
+        // the saved setting ("EU,NA") as a set; anything that isn't a continent code is dropped
+        internal static HashSet<string> Continents(string setting)
+        {
+            return new HashSet<string>((setting ?? "").Split(',').Select(s => s.Trim().ToUpperInvariant()).Where(s => ContinentCodes.Contains(s)));
+        }
+
+        // none ticked shows every row; calls to me always show; a sender cty.dat can't place is hidden while filtering
+        internal static bool ContinentShows(DecodeRow r, HashSet<string> conts)
+        {
+            if (conts.Count == 0 || r.Kind == RowKind.ToMe) return true;
+            return r.Continent != null && conts.Contains(r.Continent);
+        }
+
+        private void contChipText()
+        {
+            HashSet<string> conts = Continents(_host.GetSetting("fcont", ""));
+            _contChip.On = conts.Count > 0;
+            _contChip.Text = conts.Count == 0 ? "Continents" : string.Join(" ", ContinentCodes.Where(conts.Contains));
+            _activity.Invalidate();
+        }
+
+        // ticking stays open, so several can be chosen; "All continents" clears them
+        private void continentMenu(DecodeList.Chip chip)
+        {
+            HashSet<string> conts = Continents(_host.GetSetting("fcont", ""));
+            ContextMenuStrip menu = new ContextMenuStrip();
+            Action save = () =>
+            {
+                _host.SetSetting("fcont", string.Join(",", ContinentCodes.Where(conts.Contains)));
+                contChipText();
+                applyFilter();
+            };
+            ToolStripMenuItem all = new ToolStripMenuItem("All continents") { Checked = conts.Count == 0 };
+            menu.Items.Add(all);
+            menu.Items.Add(new ToolStripSeparator());
+            List<ToolStripMenuItem> items = new List<ToolStripMenuItem>();
+            for (int i = 0; i < ContinentCodes.Length; i++)
+            {
+                string code = ContinentCodes[i];
+                ToolStripMenuItem it = new ToolStripMenuItem(code + "   " + ContinentNames[i]) { Checked = conts.Contains(code) };
+                it.Click += (s, e) =>
+                {
+                    if (!conts.Remove(code)) conts.Add(code);
+                    it.Checked = conts.Contains(code);
+                    all.Checked = conts.Count == 0;
+                    save();
+                };
+                items.Add(it);
+                menu.Items.Add(it);
+            }
+            all.Click += (s, e) =>
+            {
+                conts.Clear();
+                foreach (ToolStripMenuItem it in items) it.Checked = false;
+                all.Checked = true;
+                save();
+            };
+            menu.Closing += (s, e) => { if (e.CloseReason == ToolStripDropDownCloseReason.ItemClicked) e.Cancel = true; };
+            menu.Closed += (s, e) => BeginInvoke(new Action(menu.Dispose));
+            menu.Show(_activity, new Point((int)chip.Bounds.Left, (int)chip.Bounds.Bottom));
         }
 
         // ---- ALL.TXT: every decode and transmission, in WSJT-X's format (DataFolder\ALL.TXT) ----

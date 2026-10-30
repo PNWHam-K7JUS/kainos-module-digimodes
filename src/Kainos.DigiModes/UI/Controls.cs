@@ -57,6 +57,7 @@ namespace Kainos.DigiModes.UI
         public RowKind Kind;
         public Qso.WorkedMark Mark;     // how new the sender is (Qso/Worked.cs)
         public string Note;             // the sender's country, right-aligned
+        public string Continent;        // the sender's continent from cty.dat (NA, SA, EU, AF, AS, OC, AN), or null
     }
 
     // An owner-drawn list of decodes, newest at the bottom; it follows the bottom unless scrolled up
@@ -76,7 +77,8 @@ namespace Kainos.DigiModes.UI
 
         // ---- filtering, with toggle chips in the heading ("CQ only", "Hide worked") ----
 
-        internal class Chip { public string Text; public bool On; public Action<bool> Toggled; public RectangleF Bounds; }
+        // a chip toggles, or with Pressed set, does that instead (the Continents chip opens its list)
+        internal class Chip { public string Text; public bool On; public Action<bool> Toggled; public Action<Chip> Pressed; public RectangleF Bounds; }
         public readonly List<Chip> Chips = new List<Chip>();
         private Func<DecodeRow, bool> _filter;
 
@@ -165,7 +167,13 @@ namespace Kainos.DigiModes.UI
         {
             Focus();
             foreach (Chip c in Chips)
-                if (c.Bounds.Contains(e.X, e.Y)) { c.On = !c.On; c.Toggled?.Invoke(c.On); Invalidate(); return; }
+                if (c.Bounds.Contains(e.X, e.Y))
+                {
+                    if (c.Pressed != null) c.Pressed(c);
+                    else { c.On = !c.On; c.Toggled?.Invoke(c.On); }
+                    Invalidate();
+                    return;
+                }
             Rectangle th = thumb();
             if (!th.IsEmpty && e.X >= Width - barRoom)
             {

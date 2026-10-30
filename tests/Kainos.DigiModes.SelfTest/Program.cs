@@ -1,4 +1,4 @@
-﻿/*  Program.cs (self-test)
+/*  Program.cs (self-test)
 
 Checks the module without a radio: the encoder against WSJT-X's ft8code, and the whole path (tones -> GFSK at
 48 kHz -> noise -> 12 kHz resampler -> jt9) decoding what was sent, for FT8 and FT4; the QSO sequencer; parsing.
@@ -438,6 +438,17 @@ namespace Kainos.DigiModes.SelfTest
                       m("CQ VK3XYZ QF22", "20M") == WorkedMark.NewGrid && m("CQ VK2ABC QF56", "20M") == WorkedMark.WorkedBand &&
                       m("K7JUS VK2ABC RR73", "20M") == WorkedMark.WorkedBand && m("CQ W1AW FN31", "40M") == WorkedMark.NewGrid,
                     "worked before: new DXCC, new on the band, new grid, already worked (from an ADIF log of " + n + ")");
+
+                // the continent filter (Kainos #44): continents from cty.dat, the saved setting, and which rows show
+                Func<string, string> ct = msg => { WorkedInfo i = wk.Classify(msg, "20M"); return i != null && i.Entity != null ? i.Entity.Continent : null; };
+                Func<string, UI.RowKind, UI.DecodeRow> row = (msg, k) => new UI.DecodeRow { Text = msg, Kind = k, Continent = ct(msg) };
+                HashSet<string> eu = UI.DigiPane.Continents("eu, XX,,"), none = UI.DigiPane.Continents(""), euNa = UI.DigiPane.Continents("NA,EU");
+                UI.DecodeRow ja = row("CQ JA1ABC PM95", UI.RowKind.Cq), dl = row("CQ DL1ABC JO62", UI.RowKind.Cq), us = row("CQ K1ABC FN42", UI.RowKind.Cq);
+                UI.DecodeRow toMe = row("K7JUS JA1ABC -10", UI.RowKind.ToMe), odd = new UI.DecodeRow { Text = "TNX 73", Kind = UI.RowKind.Normal };
+                check(ja.Continent == "AS" && dl.Continent == "EU" && us.Continent == "NA" && eu.SetEquals(new[] { "EU" }) && none.Count == 0 && euNa.Count == 2 &&
+                      !UI.DigiPane.ContinentShows(ja, eu) && UI.DigiPane.ContinentShows(dl, eu) && !UI.DigiPane.ContinentShows(us, eu) && UI.DigiPane.ContinentShows(us, euNa) &&
+                      UI.DigiPane.ContinentShows(toMe, eu) && !UI.DigiPane.ContinentShows(odd, eu) && UI.DigiPane.ContinentShows(ja, none) && UI.DigiPane.ContinentShows(odd, none),
+                    "continent filter: AS / EU / NA from cty.dat; EU shows DL not JA or K; calls to me always; unknown hidden only while filtering; none ticked shows all");
             }
 
             // 11. PSK Reporter: who a decode reports, and the IPFIX packet (read back field by field; nothing is sent)
