@@ -40,7 +40,7 @@ namespace Kainos.DigiModes.Decode
     internal class Jt9Decoder
     {
         private static readonly Regex Line = new Regex(@"^\s*(\d{4,6}|\*{4,6})\s+(-?\d+)\s+(-?\d+\.\d+)\s+(\d+)\s+\S\s+(.*?)\s*$", RegexOptions.Compiled);
-        private static readonly Regex ApTag = new Regex(@"\s+(a\d+|\?)$", RegexOptions.Compiled);
+        private static readonly Regex ApTag = new Regex(@"\s+(a\d+|\?|q\d\*?)$", RegexOptions.Compiled);       // Q65: q0 - q3
 
         public string Jt9Exe;
         public string WorkFolder;       // jt9's data and temp files (wisdom, decoded.txt), and the WAVs
@@ -63,13 +63,22 @@ namespace Kainos.DigiModes.Decode
                 Wav.Write16(wav, samples, 12000);
                 List<string> a = new List<string>
                 {
-                    mode == FtxMode.FT8 ? "-8" : mode == FtxMode.FT4 ? "-5" : mode == FtxMode.FT2 ? "--ft2" : mode == FtxMode.JT65 ? "-6" : "-9",      // FT2: only the long form works in jt9 3.1.0
+                    mode == FtxMode.FT8 ? "-8" : mode == FtxMode.FT4 ? "-5" : mode == FtxMode.FT2 ? "--ft2" : mode == FtxMode.JT65 ? "-6" :
+                    mode == FtxMode.Q65 ? "-3" : mode == FtxMode.FST4W ? "-W" : "-9",      // FT2: only the long form works in jt9 3.1.0
                     "-d", (depth > 0 ? depth : Depth).ToString(CultureInfo.InvariantCulture),
                     "-f", rxFreq.ToString(CultureInfo.InvariantCulture),
                     "-L", LowHz.ToString(CultureInfo.InvariantCulture),
                     "-H", HighHz.ToString(CultureInfo.InvariantCulture),
                     "-a", q(WorkFolder), "-t", q(WorkFolder), "-e", q(Path.GetDirectoryName(Jt9Exe)),
                 };
+                // Q65 and FST4W: the period (and Q65's submode); FST4W searches 1400 - 1600 Hz, Q65 100 Hz either side
+                // of the receive frequency first (it looks over the rest of the band too)
+                if (mode == FtxMode.Q65 || mode == FtxMode.FST4W)
+                {
+                    a.Add("-p"); a.Add(((int)FtxModes.Period(mode)).ToString(CultureInfo.InvariantCulture));
+                    a.Add("-F"); a.Add("100");
+                    if (mode == FtxMode.Q65) { a.Add("-b"); a.Add(FtxModes.Q65Sub.ToString()); }
+                }
                 if (okCall(myCall)) { a.Add("-c"); a.Add(myCall); }
                 if (okGrid(myGrid)) { a.Add("-G"); a.Add(myGrid.Substring(0, 4)); }
                 if (okCall(hisCall)) { a.Add("-x"); a.Add(hisCall); }

@@ -63,7 +63,7 @@ namespace Kainos.DigiModes
             _psk.Status += s => host.Log(s);
             _engine.Decoded += (slot, mode, list) =>
             {
-                if (!_psk.Running || mode == Ftx.FtxMode.WSPR) return;        // WSPR spots go to WSPRnet instead
+                if (!_psk.Running || Ftx.FtxModes.IsBeacon(mode)) return;    // WSPR spots go to WSPRnet instead (FST4W's to neither, yet)
                 _psk.MyCall = host.Callsign;
                 _psk.MyGrid = host.Grid;
                 long dial = (long)host.Radio.VfoHz(_engine.Rx);
@@ -156,6 +156,8 @@ namespace Kainos.DigiModes
                 e.Ft8CodeExe = Path.Combine(c, "ft8code.exe");
                 e.Jt65CodeExe = Path.Combine(c, "jt65code.exe");
                 e.Jt9CodeExe = Path.Combine(c, "jt9code.exe");
+                e.Q65CodeExe = Path.Combine(c, "q65code.exe");
+                e.Fst4SimExe = Path.Combine(c, "fst4sim.exe");
                 e.Wspr.Exe = Path.Combine(c, "wsprd.exe");
                 e.Wspr.WorkFolder = Path.Combine(host.DataFolder, "wspr");
                 host.Log("decoder: " + jt9);

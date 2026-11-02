@@ -1,4 +1,4 @@
-/*  Program.cs (self-test)
+﻿/*  Program.cs (self-test)
 
 Checks the module without a radio: the encoder against WSJT-X's ft8code, and the whole path (tones -> GFSK at
 48 kHz -> noise -> 12 kHz resampler -> jt9) decoding what was sent, for FT8 and FT4; the QSO sequencer; parsing.
@@ -171,6 +171,36 @@ namespace Kainos.DigiModes.SelfTest
                 }
             }
 
+            // 17b. Q65 (two periods and submodes) and FST4W: our tones (from q65code / fst4sim) and waveforms, decoded by jt9
+            {
+                int oldP = FtxModes.Q65Period, oldF = FtxModes.Fst4wPeriod;
+                char oldS = FtxModes.Q65Sub;
+                foreach (string v in new[] { "30A", "60D", "15C", "FST4W-120", "FST4W-300" })
+                {
+                    FtxMode mode = v.StartsWith("FST4W") ? FtxMode.FST4W : FtxMode.Q65;
+                    if (mode == FtxMode.Q65) { FtxModes.Q65Period = int.Parse(v.Substring(0, 2)); FtxModes.Q65Sub = v[2]; }
+                    else FtxModes.Fst4wPeriod = int.Parse(v.Substring(6));
+                    string m = mode == FtxMode.Q65 ? "K1ABC K7JUS R-12" : "K7JUS CN87 37", why, asDec;
+                    double f0 = mode == FtxMode.Q65 ? 1000 : 1520;
+                    byte[] tones = mode == FtxMode.Q65 ? OtherModes.JtTones(mode, Path.Combine(bin, "q65code.exe"), m, out asDec, out why)
+                                                       : OtherModes.Fst4wTones(Path.Combine(bin, "fst4sim.exe"), "K7JUS", "CN87", 37, FtxModes.Fst4wPeriod, out why);
+                    if (tones == null) { check(false, FtxModes.Label(mode) + " tones: " + why); continue; }
+                    float[] w = mode == FtxMode.Q65 ? OtherModes.SynthesizeFsk(mode, tones, f0, 12000) : OtherModes.SynthesizeFst4(tones, f0, 12000, FtxModes.SymbolPeriod(mode));
+                    float[] slot = new float[(int)(FtxModes.Period(mode) * 12000)];
+                    int at = (int)(FtxModes.TxStart(mode) * 12000);
+                    // -18 dB in 2.5 kHz for Q65 (it goes to about -24 at 30 s), -24 for FST4W (it goes below -30)
+                    double amp = 0.05 * Math.Sqrt(2500.0 / 6000) * Math.Sqrt(2) * Math.Pow(10, (mode == FtxMode.Q65 ? -18 : -24) / 20.0);
+                    for (int i = 0; i < slot.Length; i++) slot[i] = (float)(gauss(rnd) * 0.05 + (i >= at && i - at < w.Length ? w[i - at] * amp : 0));
+                    DateTime st = new DateTime(2026, 10, 16, 12, 10, 0, DateTimeKind.Utc);
+                    if (args.Contains("--keepwav")) Wav.Write16(Path.Combine(work, "test-" + FtxModes.Label(mode) + ".wav"), slot, 12000);
+                    List<DecodeLine> res = dec.Decode(mode, st, slot, (int)f0, "K7JUS", "CN87", "K1ABC", out why);
+                    DecodeLine hit = res.FirstOrDefault(r => r.Message == m);
+                    check(hit != null && Math.Abs(hit.Dt) <= 0.3 && Math.Abs(hit.Freq - f0) <= 3,
+                        FtxModes.Label(mode) + " decodes: " + (hit != null ? hit.ToString() : "nothing (" + (why ?? "") + ", " + string.Join(" | ", res.Select(r => r.Message)) + ")"));
+                }
+                FtxModes.Q65Period = oldP; FtxModes.Q65Sub = oldS; FtxModes.Fst4wPeriod = oldF;
+            }
+
             // 18. the engine in JT65 and WSPR, on a simulated clock (decoding as it happens: JT65's and WSPR's decodes
             // run long before the next period, so the frozen clock doesn't matter)
             {
@@ -228,6 +258,28 @@ namespace Kainos.DigiModes.SelfTest
                 check(wsp != null && wsp.Wspr.Grid == "EN37" && wsp.Wspr.Dbm == 30 && Math.Abs(wsp.Wspr.FreqMHz - 14.09705) < 0.00002,
                     "WSPR through the engine: W9XYZ's beacon decoded (" + (wsp != null ? wsp.Wspr.ToString() : "nothing") + ")");
                 check(wsent.Count == 1 && wsent[0].StartsWith("1:K7JUS CN87 37@"), "WSPR beacon sent at the start of a period: " + string.Join(" | ", wsent));
+
+                // FST4W-120 the same way: W9XYZ's beacon decoded by jt9, ours sent (tones from fst4sim) at a period's start
+                DateTime f0t = new DateTime(2026, 10, 16, 16, 0, 0, DateTimeKind.Utc);
+                DateTime fnow = f0t.AddSeconds(-1);
+                SimAir fair = new SimAir(fnow);
+                FakeHost fh = new FakeHost(bin, Path.Combine(work, "fst4wengine")) { Air = fair, Clock = () => fnow, Window = null, Vfo = 14095600 };
+                FtxModes.Fst4wPeriod = 120;
+                DigiEngine fe = new DigiEngine(fh) { Now = () => fnow, SyncDecode = true, Mode = FtxMode.FST4W, RxFreq = 1500, TxFreq = 1500, WsprDbm = 37, WsprTxPercent = 100 };
+                fe.Decoder.Jt9Exe = jt9; fe.Decoder.WorkFolder = Path.Combine(work, "fst4wengine-jt9"); fe.Fst4SimExe = Path.Combine(bin, "fst4sim.exe");
+                fe.Qso.MyCall = "K7JUS"; fe.Qso.MyGrid = "CN87";
+                byte[] ft = OtherModes.Fst4wTones(fe.Fst4SimExe, "W9XYZ", "EN37", 30, 120, out wwhy);
+                fair.Add(f0t.AddSeconds(1), OtherModes.SynthesizeFst4(ft, 1450, SimAir.Rate, FtxModes.SymbolPeriod(FtxMode.FST4W)).Select(v => v * 0.3f).ToArray());
+                List<DecodeLine> fheard = new List<DecodeLine>();
+                List<string> fsent = new List<string>();
+                fe.Decoded += (slot, m, list) => fheard.AddRange(list);
+                fe.TxStarted += (slot, msg) => fsent.Add(((int)Math.Round((slot - f0t).TotalSeconds / 120)) + ":" + msg);
+                while (fnow < f0t.AddSeconds(118)) { fe.Step(); fnow = fnow.AddMilliseconds(50); }
+                fe.TxEnabled = true;
+                while (fnow < f0t.AddSeconds(125)) { fe.Step(); fnow = fnow.AddMilliseconds(50); }
+                DecodeLine fsp = fheard.FirstOrDefault(d => d.Message == "W9XYZ EN37 30");
+                check(fsp != null && Math.Abs(fsp.Freq - 1450) <= 2, "FST4W-120 through the engine: W9XYZ's beacon decoded (" + (fsp != null ? fsp.ToString() : string.Join(" | ", fheard.Select(d => d.Message))) + ")");
+                check(fsent.Count == 1 && fsent[0] == "1:K7JUS CN87 37", "FST4W beacon sent at the start of a period: " + string.Join(" | ", fsent));
             }
 
             // 17b. WSPR: our encoder and FSK, decoded by WSJT-X's wsprd

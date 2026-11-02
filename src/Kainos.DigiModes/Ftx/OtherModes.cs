@@ -1,6 +1,6 @@
 ﻿/*  OtherModes.cs
 
-JT65, JT9 and WSPR transmit tones, and their plain (continuous-phase) FSK audio.
+JT65, JT9, Q65, WSPR and FST4W transmit tones, and their audio: plain (continuous-phase) FSK, and FST4W's Gaussian FSK.
 
   JT65: WSJT-X's jt65code gives the 63 data symbols (Reed-Solomon coded, interleaved, Gray coded); they take the
         126-symbol frame's places where the sync pattern (nprc, from WSJT-X's setup65.f90) is 0, the sync tone the
@@ -9,6 +9,11 @@ JT65, JT9 and WSPR transmit tones, and their plain (continuous-phase) FSK audio.
   WSPR: encoded here, after WSJT-X's wsprsim_utils.c: callsign (28 bits) and grid + power (22 bits), the K=32
         rate 1/2 convolutional code (polynomials 0xF2D05351, 0xE4613C47), bit-reversal interleaving and the
         162-bit sync vector; tone = 2 x data bit + sync bit. 12000 / 8192 Hz apart, 8192 / 12000 s each.
+  Q65:  WSJT-X's q65code gives the 85 channel symbols: 0 the sync tone (the lowest, at the Tx frequency), a data
+        symbol d tone d + 1, of 65. Plain FSK, the tones baud x 1, 2, 4, 8 or 16 apart (submode A - E).
+  FST4W: WSJT-X's fst4sim gives the 160 channel tones (0 - 3), which go out as WSJT-X's gen_fst4wave makes them:
+        Gaussian FSK (BT 2), the tones a baud apart, the lowest at the Tx frequency (as fst4sim puts it, and jt9
+        reports it), a quarter-symbol ramp at each end.
 
 This file is part of the Kainos Digital Modes module. Copyright (C) 2026 Justin Cron K7JUS. GPLv3 or later.
 */
@@ -50,7 +55,7 @@ namespace Kainos.DigiModes.Ftx
         {
             decodedAs = null;
             problem = null;
-            if (string.IsNullOrEmpty(codeExe) || !File.Exists(codeExe)) { problem = Path.GetFileName(codeExe ?? (mode == FtxMode.JT65 ? "jt65code.exe" : "jt9code.exe")) + " isn't in the decoder folder"; return null; }
+            if (string.IsNullOrEmpty(codeExe) || !File.Exists(codeExe)) { problem = Path.GetFileName(codeExe ?? (mode == FtxMode.JT65 ? "jt65code.exe" : mode == FtxMode.Q65 ? "q65code.exe" : "jt9code.exe")) + " isn't in the decoder folder"; return null; }
             string output = run(codeExe, message, out problem);
             if (output == null) return null;
             return ParseJt(mode, output, out decodedAs, out problem);
@@ -87,19 +92,95 @@ namespace Kainos.DigiModes.Ftx
                 if (v.Count < 63 || v.Take(63).Any(x => x < 0 || x > 63)) { problem = "JT65: expected 63 symbols, got " + v.Count; return null; }
                 return Jt65Tones(v.Take(63).ToArray());
             }
+            if (mode == FtxMode.Q65)
+            {
+                if (v.Count < 85 || v.Take(85).Any(x => x < 0 || x > 64)) { problem = "Q65: expected 85 tones, got " + v.Count; return null; }
+                return v.Take(85).Select(x => (byte)x).ToArray();
+            }
             if (v.Count < 85 || v.Take(85).Any(x => x < 0 || x > 8)) { problem = "JT9: expected 85 tones, got " + v.Count; return null; }
             return v.Take(85).Select(x => (byte)x).ToArray();
         }
 
-        private static string run(string exe, string message, out string problem)
+        // ---- FST4W ----
+
+        // fst4sim "CALL GRID dBm" period f0 DT fdop delay nfiles snr W: the tones are printed under "Channel symbols:"
+        // (and it writes a WAV of the signal, which is thrown away)
+        public static byte[] Fst4wTones(string simExe, string call, string grid, int dbm, int period, out string problem)
+        {
+            problem = null;
+            if (string.IsNullOrEmpty(simExe) || !File.Exists(simExe)) { problem = "fst4sim.exe isn't in the decoder folder"; return null; }
+            if (string.IsNullOrEmpty(call) || string.IsNullOrEmpty(grid) || grid.Length < 4) { problem = "FST4W needs your callsign and grid"; return null; }
+            string work = Path.Combine(Path.GetTempPath(), "kainos-fst4w");
+            Directory.CreateDirectory(work);
+            string msg = call.ToUpperInvariant() + " " + grid.Substring(0, 4).ToUpperInvariant() + " " + dbm.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            string output = run(simExe, msg, out problem, " " + period.ToString(System.Globalization.CultureInfo.InvariantCulture) + " 1500 0.0 0.0 0.0 1 99 T", work);
+            try { foreach (string w in Directory.GetFiles(work, "*.wav")) File.Delete(w); } catch { }
+            if (output == null) return null;
+            return ParseFst4(output, out problem);
+        }
+
+        internal static byte[] ParseFst4(string output, out string problem)
+        {
+            problem = null;
+            string[] lines = output.Replace("\r", "").Split('\n');
+            int at = Array.FindIndex(lines, l => l.Trim().StartsWith("Channel symbols"));
+            if (at < 0) { problem = "no channel symbols from fst4sim"; return null; }
+            List<byte> v = new List<byte>();
+            for (int i = at + 1; i < lines.Length && v.Count < 160; i++)
+            {
+                string t = lines[i].Trim();
+                if (t.Length == 0) { if (v.Count > 0) break; continue; }
+                if (!t.All(c => c >= '0' && c <= '3')) break;
+                foreach (char c in t) v.Add((byte)(c - '0'));
+            }
+            if (v.Count != 160) { problem = "FST4W: expected 160 tones, got " + v.Count; return null; }
+            return v.ToArray();
+        }
+
+        // gen_fst4wave: Gaussian FSK (BT 2), the tones a baud apart from f0 (tone 0), continuous phase, the first and
+        // last quarter-symbol ramped
+        public static float[] SynthesizeFst4(byte[] tones, double f0, int rate, double symPeriod)
+        {
+            int nsps = (int)Math.Round(rate * symPeriod), nsym = tones.Length;
+            double[] pulse = new double[3 * nsps];
+            const double k = 5.336446256636997;        // pi * sqrt(2 / ln 2)
+            for (int i = 0; i < pulse.Length; i++)
+            {
+                double t = (i + 1 - 1.5 * nsps) / nsps;         // WSJT-X's (i - 1.5 nsps) / nsps, i from 1
+                pulse[i] = (FtxModulator.Erf(k * 2.0 * (t + 0.5)) - FtxModulator.Erf(k * 2.0 * (t - 0.5))) / 2;
+            }
+            double[] dphi = new double[(nsym + 2) * nsps];
+            double peak = 2 * Math.PI / nsps;
+            for (int j = 0; j < nsym; j++)
+            {
+                int ib = j * nsps;
+                for (int i = 0; i < 3 * nsps; i++) dphi[ib + i] += peak * pulse[i] * tones[j];
+            }
+            double shift = 2 * Math.PI * f0 / rate;
+            float[] s = new float[nsym * nsps];
+            double phi = 0;
+            for (int j = nsps, o = 0; j < (nsym + 1) * nsps; j++, o++)
+            {
+                s[o] = (float)Math.Sin(phi);
+                phi += dphi[j] + shift;
+                if (phi > 2 * Math.PI) phi -= 2 * Math.PI;
+            }
+            int q = nsps / 4;
+            for (int i = 0; i < q; i++) s[i] *= (float)((1 - Math.Cos(2 * Math.PI * i / (nsps / 2.0))) / 2);
+            int k1 = (nsym - 1) * nsps + 3 * nsps / 4;
+            for (int i = 0; i <= q && k1 + i < s.Length; i++) s[k1 + i] *= (float)((1 + Math.Cos(2 * Math.PI * i / (nsps / 2.0))) / 2);
+            return s;
+        }
+
+        private static string run(string exe, string message, out string problem, string more = "", string workDir = null)
         {
             problem = null;
             try
             {
-                ProcessStartInfo psi = new ProcessStartInfo(exe, "\"" + message.Replace("\"", "") + "\"")
+                ProcessStartInfo psi = new ProcessStartInfo(exe, "\"" + message.Replace("\"", "") + "\"" + more)
                 {
                     UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
-                    WorkingDirectory = Path.GetDirectoryName(exe),
+                    WorkingDirectory = workDir ?? Path.GetDirectoryName(exe),
                 };
                 using (Process p = Process.Start(psi))
                 {

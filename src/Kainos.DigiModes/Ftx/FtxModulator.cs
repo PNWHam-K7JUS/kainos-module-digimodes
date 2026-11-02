@@ -10,25 +10,44 @@ using System;
 
 namespace Kainos.DigiModes.Ftx
 {
-    // The modes: FT8 and FT4 (Gaussian FSK, this file), JT65, JT9 and WSPR (plain FSK, OtherModes.cs)
-    internal enum FtxMode { FT8, FT4, JT65, JT9, WSPR, FT2 }
+    // The modes: FT8 and FT4 (Gaussian FSK, this file), JT65, JT9, Q65 and WSPR (plain FSK) and FST4W (Gaussian FSK,
+    // OtherModes.cs)
+    internal enum FtxMode { FT8, FT4, JT65, JT9, WSPR, FT2, Q65, FST4W }
 
     internal static class FtxModes
     {
-        public static readonly FtxMode[] All = { FtxMode.FT8, FtxMode.FT4, FtxMode.FT2, FtxMode.JT65, FtxMode.JT9, FtxMode.WSPR };
+        public static readonly FtxMode[] All = { FtxMode.FT8, FtxMode.FT4, FtxMode.FT2, FtxMode.JT65, FtxMode.JT9, FtxMode.Q65, FtxMode.WSPR, FtxMode.FST4W };
+
+        // Q65's period (15, 30, 60, 120 or 300 s) and submode (A - E: its tones 1, 2, 4, 8 or 16 x the baud apart), and
+        // FST4W's period (120, 300, 900 or 1800 s): chosen in the Mode menu
+        public static int Q65Period = 30, Fst4wPeriod = 120;
+        public static char Q65Sub = 'A';
+        public static readonly int[] Q65Periods = { 15, 30, 60, 120, 300 }, Fst4wPeriods = { 120, 300, 900, 1800 };
+
+        // samples a symbol at 12000 a second, as WSJT-X has them
+        public static int Q65Nsps(int period) { switch (period) { case 15: return 1800; case 30: return 3600; case 60: return 7200; case 120: return 16000; default: return 41472; } }
+        public static int Fst4Nsps(int period) { switch (period) { case 15: return 720; case 30: return 1680; case 60: return 3888; case 120: return 8200; case 300: return 21504; case 900: return 66560; default: return 134400; } }
+
+        // the beacon modes: no QSOs, a share of the periods transmitting
+        public static bool IsBeacon(FtxMode m) { return m == FtxMode.WSPR || m == FtxMode.FST4W; }
 
         public static bool IsFtx(FtxMode m) { return m == FtxMode.FT8 || m == FtxMode.FT4 || m == FtxMode.FT2; }
 
         // FT2: FT4's signal at twice the speed (4-GFSK, 24 ms symbols, 3.75 s periods). Young, with two implementations
         // (Decodium, WSJT-X Improved): marked experimental
         public static bool Experimental(FtxMode m) { return m == FtxMode.FT2; }
-        public static string Label(FtxMode m) { return Experimental(m) ? m + " (experimental)" : m.ToString(); }
+        public static string Label(FtxMode m)
+        {
+            if (m == FtxMode.Q65) return "Q65-" + Q65Period + Q65Sub;
+            if (m == FtxMode.FST4W) return "FST4W-" + Fst4wPeriod;
+            return Experimental(m) ? m + " (experimental)" : m.ToString();
+        }
         public static bool Ft4Like(FtxMode m) { return m == FtxMode.FT4 || m == FtxMode.FT2; }
-        public static bool HasQso(FtxMode m) { return m != FtxMode.WSPR; }                  // WSPR is beacons, no QSOs
+        public static bool HasQso(FtxMode m) { return !IsBeacon(m); }                       // WSPR and FST4W are beacons, no QSOs
 
         public static double Period(FtxMode m)
         {
-            switch (m) { case FtxMode.FT8: return 15.0; case FtxMode.FT4: return 7.5; case FtxMode.FT2: return 3.75; case FtxMode.WSPR: return 120.0; default: return 60.0; }
+            switch (m) { case FtxMode.FT8: return 15.0; case FtxMode.FT4: return 7.5; case FtxMode.FT2: return 3.75; case FtxMode.WSPR: return 120.0; case FtxMode.Q65: return Q65Period; case FtxMode.FST4W: return Fst4wPeriod; default: return 60.0; }
         }
 
         public static double SymbolPeriod(FtxMode m)
@@ -40,38 +59,46 @@ namespace Kainos.DigiModes.Ftx
                 case FtxMode.FT2: return 0.024;
                 case FtxMode.JT65: return 4096.0 / 11025.0;
                 case FtxMode.JT9: return 6912.0 / 12000.0;
+                case FtxMode.Q65: return Q65Nsps(Q65Period) / 12000.0;
+                case FtxMode.FST4W: return Fst4Nsps(Fst4wPeriod) / 12000.0;
                 default: return 8192.0 / 12000.0;           // WSPR
             }
         }
 
-        public static double ToneSpacing(FtxMode m) { return 1.0 / SymbolPeriod(m); }
+        public static double ToneSpacing(FtxMode m) { return (m == FtxMode.Q65 ? 1 << (Q65Sub - 'A') : 1) / SymbolPeriod(m); }
 
         // the signal's width (Hz)
         public static double Bandwidth(FtxMode m)
         {
-            switch (m) { case FtxMode.FT8: return 8 * 6.25; case FtxMode.FT4: return 4 * 20.833; case FtxMode.FT2: return 4 * 41.667; case FtxMode.JT65: return 66 * 11025.0 / 4096; case FtxMode.JT9: return 9 * 12000.0 / 6912; default: return 6; }
+            switch (m) { case FtxMode.FT8: return 8 * 6.25; case FtxMode.FT4: return 4 * 20.833; case FtxMode.FT2: return 4 * 41.667; case FtxMode.JT65: return 66 * 11025.0 / 4096; case FtxMode.JT9: return 9 * 12000.0 / 6912; case FtxMode.Q65: return 65 * ToneSpacing(m); case FtxMode.FST4W: return 4 * ToneSpacing(m); default: return 6; }
         }
 
         // how long the signal lasts (s)
         public static double Duration(FtxMode m)
         {
-            switch (m) { case FtxMode.FT8: return 79 * 0.160; case FtxMode.FT4: return 105 * 0.048; case FtxMode.FT2: return 105 * 0.024; case FtxMode.JT65: return 126 * 4096.0 / 11025; case FtxMode.JT9: return 85 * 6912.0 / 12000; default: return 162 * 8192.0 / 12000; }
+            switch (m) { case FtxMode.FT8: return 79 * 0.160; case FtxMode.FT4: return 105 * 0.048; case FtxMode.FT2: return 105 * 0.024; case FtxMode.JT65: return 126 * 4096.0 / 11025; case FtxMode.JT9: return 85 * 6912.0 / 12000; case FtxMode.Q65: return 85 * SymbolPeriod(m); case FtxMode.FST4W: return 160 * SymbolPeriod(m); default: return 162 * 8192.0 / 12000; }
         }
 
         // where in the period the signal starts (DT 0)
-        public static double TxStart(FtxMode m) { return IsFtx(m) ? 0.5 : 1.0; }
+        // (WSJT-X's Modulator: Q65-15 and Q65-30 0.5 s, as FT8; the longer ones 1 s)
+        public static double TxStart(FtxMode m) { return IsFtx(m) || (m == FtxMode.Q65 && Q65Period <= 30) ? 0.5 : 1.0; }
         public static double Bt(FtxMode m) { return m == FtxMode.FT8 ? 2.0 : 1.0; }
 
         // when the decode runs: once a signal at DT 0 has ended (FT8 / FT4 also again at the period's end)
         public static double DecodeAt(FtxMode m)
         {
-            switch (m) { case FtxMode.FT8: return 13.6; case FtxMode.FT4: return 5.9; case FtxMode.FT2: return 3.1; case FtxMode.WSPR: return 113.5; default: return 50.0; }
+            switch (m)
+            {
+                case FtxMode.FT8: return 13.6; case FtxMode.FT4: return 5.9; case FtxMode.FT2: return 3.1; case FtxMode.WSPR: return 113.5;
+                case FtxMode.Q65: case FtxMode.FST4W: return Math.Min(Period(m) - 0.4, TxStart(m) + Duration(m) + 0.6);
+                default: return 50.0;
+            }
         }
 
         // the label WSJT-X's UDP messages use for the mode
         public static string UdpChar(FtxMode m)
         {
-            switch (m) { case FtxMode.FT8: return "~"; case FtxMode.FT4: case FtxMode.FT2: return "+"; case FtxMode.JT65: return "#"; case FtxMode.JT9: return "@"; default: return "`"; }
+            switch (m) { case FtxMode.FT8: return "~"; case FtxMode.FT4: case FtxMode.FT2: return "+"; case FtxMode.JT65: return "#"; case FtxMode.JT9: return "@"; case FtxMode.Q65: return ":"; default: return "`"; }
         }
     }
 

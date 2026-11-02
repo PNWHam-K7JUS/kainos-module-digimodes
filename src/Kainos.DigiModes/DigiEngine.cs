@@ -39,7 +39,7 @@ namespace Kainos.DigiModes
         public double RxLatencyMs;              // the receive path's delay
         public int WatchdogMinutes = 6;
         public bool StopAfter73 = true;
-        public string Ft8CodeExe, Jt65CodeExe, Jt9CodeExe;
+        public string Ft8CodeExe, Jt65CodeExe, Jt9CodeExe, Q65CodeExe, Fst4SimExe;
         public readonly WsprDecoder Wspr = new WsprDecoder();
         public int WsprDbm = 37;                // WSPR: the power sent in the beacon (dBm)
         public int WsprTxPercent = 20;          // WSPR: the share of periods to transmit in
@@ -370,7 +370,7 @@ namespace Kainos.DigiModes
             if (!TxEnabled) return;
 
             FtxMode mode = Mode;
-            bool wspr = mode == FtxMode.WSPR;
+            bool wspr = FtxModes.IsBeacon(mode);           // WSPR and FST4W
 
             // the Tx watchdog (a Hound must press Enable Tx at least every 2 minutes, as WSJT-X requires); not for WSPR
             // beacons, which are meant to run unattended
@@ -409,7 +409,15 @@ namespace Kainos.DigiModes
             if (wspr)
             {
                 msg = Qso.MyCall + " " + Qso.Grid4 + " " + WsprDbm;
-                tones = OtherModes.WsprTones(Qso.MyCall, Qso.MyGrid, WsprDbm, out why);
+                tones = mode == FtxMode.FST4W ? OtherModes.Fst4wTones(Fst4SimExe, Qso.MyCall, Qso.MyGrid, WsprDbm, (int)FtxModes.Period(mode), out why)
+                                             : OtherModes.WsprTones(Qso.MyCall, Qso.MyGrid, WsprDbm, out why);
+            }
+            else if (mode == FtxMode.Q65)
+            {
+                // Q65 carries FT8's 77-bit messages; q65code packs and codes them
+                lock (Qso) { Qso.Jt = false; msg = Pack77.Normalise(Qso.NextMessage); }
+                string decodedAs;
+                tones = OtherModes.JtTones(mode, Q65CodeExe, msg, out decodedAs, out why);
             }
             else if (FtxModes.IsFtx(mode))
             {
@@ -437,7 +445,9 @@ namespace Kainos.DigiModes
             if (rate <= 0) { Status?.Invoke("No transmit audio stream"); return; }
             // WSPR's 200 Hz window is 1400 - 1600 Hz
             int txf = hound ? houndFreq() : wspr ? (TxFreq >= 1400 && TxFreq <= 1595 ? TxFreq : 1500) : TxFreq;
-            float[] wave = FtxModes.IsFtx(mode) ? FtxModulator.Synthesize(mode, tones, txf, rate) : OtherModes.SynthesizeFsk(mode, tones, txf, rate);
+            float[] wave = FtxModes.IsFtx(mode) ? FtxModulator.Synthesize(mode, tones, txf, rate) :
+                           mode == FtxMode.FST4W ? OtherModes.SynthesizeFst4(tones, txf, rate, FtxModes.SymbolPeriod(mode)) :
+                           OtherModes.SynthesizeFsk(mode, tones, txf, rate);
             float amp = (float)Math.Pow(10, LevelDb / 20.0);
             for (int i = 0; i < wave.Length; i++) wave[i] *= amp;
 

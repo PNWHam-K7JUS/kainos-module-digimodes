@@ -120,7 +120,8 @@ namespace Kainos.DigiModes.Qso
             public double Ft8, Ft4, Jt65, Jt9, Wspr, Ft2;
             public double Freq(Ftx.FtxMode m)
             {
-                switch (m) { case Ftx.FtxMode.FT8: return Ft8; case Ftx.FtxMode.FT4: return Ft4; case Ftx.FtxMode.FT2: return Ft2; case Ftx.FtxMode.JT65: return Jt65; case Ftx.FtxMode.JT9: return Jt9; default: return Wspr; }
+                // Q65 has no usual frequencies here (it's tuned by hand); FST4W shares WSPR's (1400 - 1600 Hz up)
+                switch (m) { case Ftx.FtxMode.FT8: return Ft8; case Ftx.FtxMode.FT4: return Ft4; case Ftx.FtxMode.FT2: return Ft2; case Ftx.FtxMode.JT65: return Jt65; case Ftx.FtxMode.JT9: return Jt9; case Ftx.FtxMode.Q65: return 0; default: return Wspr; }
             }
         }
 
