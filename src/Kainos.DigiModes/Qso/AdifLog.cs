@@ -32,7 +32,9 @@ namespace Kainos.DigiModes.Qso
             f(sb, "CALL", q.Call);
             f(sb, "GRIDSQUARE", q.Grid);
             // ADIF: FT4 is a submode of MFSK; FT8, JT65 and JT9 are modes of their own
-            if (mode == FtxMode.FT4 || mode == FtxMode.FT2) { f(sb, "MODE", "MFSK"); f(sb, "SUBMODE", mode.ToString()); }      // FT2: ADIF 3.1.7
+            // ADIF: FT4, FT2, Q65 and FST4 are submodes of MFSK; JT4 is a mode with submodes JT4A - G
+            if (mode == FtxMode.FT4 || mode == FtxMode.FT2 || mode == FtxMode.Q65 || mode == FtxMode.FST4) { f(sb, "MODE", "MFSK"); f(sb, "SUBMODE", mode.ToString()); }      // FT2: ADIF 3.1.7
+            else if (mode == FtxMode.JT4) { f(sb, "MODE", "JT4"); f(sb, "SUBMODE", "JT4" + FtxModes.Jt4Sub); }
             else f(sb, "MODE", mode.ToString());
             f(sb, "RST_SENT", q.RstSent);
             f(sb, "RST_RCVD", q.RstRcvd);
@@ -120,8 +122,8 @@ namespace Kainos.DigiModes.Qso
             public double Ft8, Ft4, Jt65, Jt9, Wspr, Ft2;
             public double Freq(Ftx.FtxMode m)
             {
-                // Q65 has no usual frequencies here (it's tuned by hand); FST4W shares WSPR's (1400 - 1600 Hz up)
-                switch (m) { case Ftx.FtxMode.FT8: return Ft8; case Ftx.FtxMode.FT4: return Ft4; case Ftx.FtxMode.FT2: return Ft2; case Ftx.FtxMode.JT65: return Jt65; case Ftx.FtxMode.JT9: return Jt9; case Ftx.FtxMode.Q65: return 0; default: return Wspr; }
+                // Q65, FST4 and JT4 have no usual frequencies here (they're tuned by hand); FST4W shares WSPR's (1400 - 1600 Hz up)
+                switch (m) { case Ftx.FtxMode.FT8: return Ft8; case Ftx.FtxMode.FT4: return Ft4; case Ftx.FtxMode.FT2: return Ft2; case Ftx.FtxMode.JT65: return Jt65; case Ftx.FtxMode.JT9: return Jt9; case Ftx.FtxMode.Q65: case Ftx.FtxMode.FST4: case Ftx.FtxMode.JT4: return 0; default: return Wspr; }
             }
         }
 

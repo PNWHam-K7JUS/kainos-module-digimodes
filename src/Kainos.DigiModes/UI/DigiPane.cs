@@ -61,7 +61,7 @@ namespace Kainos.DigiModes.UI
                 Controls.Add(b);
                 return b;
             };
-            _mode = btn("FT8", "The mode: FT8 (15 s), FT4 (7.5 s), FT2 (3.75 s, experimental), JT65 and JT9 (1 minute), Q65 (15 s - 5 minutes), WSPR (2-minute beacons), FST4W (2 - 30 minute beacons)");
+            _mode = btn("FT8", "The mode: FT8 (15 s), FT4 (7.5 s), FT2 (3.75 s), JT65, JT9 and JT4 (1 minute), Q65 (15 s - 5 minutes), FST4 (15 s - 30 minutes), WSPR (2-minute beacons), FST4W (2 - 30 minute beacons). FT2, JT4, Q65, FST4 and FST4W are experimental: not yet tested on the air");
             _band = btn("Band", "Tune to a band's FT8 / FT4 frequency (and set DIGU)");
             _rxSel = btn("RX1", "The receiver decoded: RX1 or RX2");
             _hold = btn("Hold Tx", "Keep the transmit frequency when answering someone (call on a clear frequency)");
@@ -197,7 +197,7 @@ namespace Kainos.DigiModes.UI
                 foreach (FtxMode m in FtxModes.All)
                 {
                     FtxMode mm = m;
-                    ToolStripMenuItem it = new ToolStripMenuItem(FtxModes.Label(m)) { Checked = m == _e.Mode };
+                    ToolStripMenuItem it = new ToolStripMenuItem(FtxModes.MenuLabel(m)) { Checked = m == _e.Mode };
                     it.Click += (s2, e2) => setMode(mm);
                     menu.Items.Add(it);
                     // Q65's period and submode, FST4W's period: a choice under each (picking one picks the mode too)
@@ -212,6 +212,22 @@ namespace Kainos.DigiModes.UI
                                 it.DropDownItems.Add(v);
                             }
                     }
+                    if (m == FtxMode.FST4)
+                        foreach (int p in FtxModes.Fst4Periods)
+                        {
+                            int pp = p;
+                            ToolStripMenuItem v = new ToolStripMenuItem("FST4-" + p + "   (" + (p < 60 ? p + " s" : (p / 60) + "-minute") + " periods" + (p >= 120 ? ", mostly 2200 m and 630 m" : "") + ")") { Checked = _e.Mode == FtxMode.FST4 && FtxModes.Fst4Period == p };
+                            v.Click += (s2, e2) => setVariant(FtxMode.FST4, pp, 'A');
+                            it.DropDownItems.Add(v);
+                        }
+                    if (m == FtxMode.JT4)
+                        foreach (char sub in "ABCDEFG")
+                        {
+                            char ss = sub;
+                            ToolStripMenuItem v = new ToolStripMenuItem("JT4" + sub + "   " + jt4Use(sub)) { Checked = _e.Mode == FtxMode.JT4 && FtxModes.Jt4Sub == sub };
+                            v.Click += (s2, e2) => setVariant(FtxMode.JT4, 60, ss);
+                            it.DropDownItems.Add(v);
+                        }
                     if (m == FtxMode.FST4W)
                         foreach (int p in FtxModes.Fst4wPeriods)
                         {
@@ -282,10 +298,18 @@ namespace Kainos.DigiModes.UI
             return "";
         }
 
-        // a Q65 period and submode, or an FST4W period: the mode too
+        // what each JT4 submode is mostly used for
+        private static string jt4Use(char sub)
+        {
+            switch (sub) { case 'A': return "(HF and 6 m)"; case 'B': return "(VHF)"; case 'D': return "(432 MHz and 1.2 GHz EME)"; case 'F': return "(10 GHz EME, microwave beacons)"; case 'G': return "(24 GHz and up)"; default: return ""; }
+        }
+
+        // a Q65 period and submode, an FST4 / FST4W period or a JT4 submode: the mode too
         internal void setVariant(FtxMode m, int period, char sub)
         {
             if (m == FtxMode.Q65) { FtxModes.Q65Period = period; FtxModes.Q65Sub = sub; _host.SetSetting("q65", period + sub.ToString()); }
+            else if (m == FtxMode.FST4) { FtxModes.Fst4Period = period; _host.SetSetting("fst4", period.ToString(CultureInfo.InvariantCulture)); }
+            else if (m == FtxMode.JT4) { FtxModes.Jt4Sub = sub; _host.SetSetting("jt4", sub.ToString()); }
             else { FtxModes.Fst4wPeriod = period; _host.SetSetting("fst4w", period.ToString(CultureInfo.InvariantCulture)); }
             if (_e.Mode == m) { if (_e.Transmitting) _e.Halt(); _e.TxEnabled = false; save(); refreshAll(); }
             else setMode(m);
@@ -618,8 +642,9 @@ namespace Kainos.DigiModes.UI
             if (_statusText.Length == 0)
                 _status.Text = !_e.Decoder.Available ? "Decoder (jt9.exe) not found: see Settings" :
                                !_e.Listening ? "Not listening" :
-                               FtxModes.Experimental(_e.Mode) ? "FT2 is experimental: checked against WSJT-X Improved, not yet on the air against Decodium" :
-                               FtxModes.IsBeacon(_e.Mode) ? FtxModes.Label(_e.Mode) + ": " + (_e.TxEnabled ? "beacon on, " + _e.WsprTxPercent + " % of periods, " + _e.WsprDbm + " dBm" : "listening") +
+                               _e.Mode == FtxMode.FT2 ? "FT2 is experimental: checked against WSJT-X Improved, not yet on the air against Decodium" :
+                               FtxModes.Experimental(_e.Mode) && !FtxModes.IsBeacon(_e.Mode) ? FtxModes.Label(_e.Mode) + " is experimental: checked against WSJT-X's own encoder and decoder, not yet on the air" :
+                               FtxModes.IsBeacon(_e.Mode) ? FtxModes.Label(_e.Mode) + (FtxModes.Experimental(_e.Mode) ? " (experimental)" : "") + ": " + (_e.TxEnabled ? "beacon on, " + _e.WsprTxPercent + " % of periods, " + _e.WsprDbm + " dBm" : "listening") +
                                    (_e.Mode == FtxMode.WSPR && _host.GetSetting("wsprnet", "0") == "1" ? ", uploading to WSPRnet" : "") :
                                _e.Qso.Activity != Contest.None ? "Contest: " + QsoEngine.Name(_e.Qso.Activity) + (_e.Qso.MyExch.Length > 0 ? " (sending " + _e.Qso.MyExch + ")" : "") : "";
             // the markers on the panadapter: RX (gold) and TX (red) at their audio frequencies above the VFO
@@ -637,7 +662,7 @@ namespace Kainos.DigiModes.UI
 
         private void refreshAll()
         {
-            _mode.Text = (_e.Mode == FtxMode.Q65 || _e.Mode == FtxMode.FST4W ? FtxModes.Label(_e.Mode) : _e.Mode.ToString()) + " \u25BE";
+            _mode.Text = (_e.Mode == FtxMode.Q65 || _e.Mode == FtxMode.FST4W || _e.Mode == FtxMode.FST4 || _e.Mode == FtxMode.JT4 ? FtxModes.Label(_e.Mode) : _e.Mode.ToString()) + " \u25BE";
             // WSPR has no QSOs: the QSO controls rest, and Enable Tx turns the beacon on
             bool qso = FtxModes.HasQso(_e.Mode);
             _qso.Enabled = _hold.Enabled = _second.Enabled = _auto.Enabled = qso;
@@ -695,6 +720,10 @@ namespace Kainos.DigiModes.UI
             { FtxModes.Q65Period = qp; FtxModes.Q65Sub = q65[q65.Length - 1]; }
             int fp = gi("fst4w", 120);
             FtxModes.Fst4wPeriod = Array.IndexOf(FtxModes.Fst4wPeriods, fp) >= 0 ? fp : 120;
+            int f4 = gi("fst4", 60);
+            FtxModes.Fst4Period = Array.IndexOf(FtxModes.Fst4Periods, f4) >= 0 ? f4 : 60;
+            string j4 = g("jt4", "A");
+            FtxModes.Jt4Sub = j4.Length == 1 && "ABCDEFG".IndexOf(j4[0]) >= 0 ? j4[0] : 'A';
             _e.Rx = gi("rx", 0) == 1 ? 1 : 0;
             _e.RxFreq = Math.Max(100, Math.Min(2900, gi("rxf", 1500)));
             _e.TxFreq = Math.Max(100, Math.Min(2900, gi("txf", 1500)));

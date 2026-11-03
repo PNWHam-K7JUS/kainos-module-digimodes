@@ -39,8 +39,9 @@ namespace Kainos.DigiModes.Decode
 
     internal class Jt9Decoder
     {
-        private static readonly Regex Line = new Regex(@"^\s*(\d{4,6}|\*{4,6})\s+(-?\d+)\s+(-?\d+\.\d+)\s+(\d+)\s+\S\s+(.*?)\s*$", RegexOptions.Compiled);
+        private static readonly Regex Line = new Regex(@"^\s*(\d{4,6}|\*{4,6})\s+(-?\d+)\s+(-?\d+\.\d+)\s+(\d+)\s+\S[*#]?\s+(.*?)\s*$", RegexOptions.Compiled);       // JT4: "$*" ("$#" inverted sync)
         private static readonly Regex ApTag = new Regex(@"\s+(a\d+|\?|q\d\*?)$", RegexOptions.Compiled);       // Q65: q0 - q3
+        private static readonly Regex Jt4Tag = new Regex(@"\s+[fd]\d*\*?$", RegexOptions.Compiled);           // JT4: how it decoded ("f", "d" ...)
 
         public string Jt9Exe;
         public string WorkFolder;       // jt9's data and temp files (wisdom, decoded.txt), and the WAVs
@@ -64,7 +65,7 @@ namespace Kainos.DigiModes.Decode
                 List<string> a = new List<string>
                 {
                     mode == FtxMode.FT8 ? "-8" : mode == FtxMode.FT4 ? "-5" : mode == FtxMode.FT2 ? "--ft2" : mode == FtxMode.JT65 ? "-6" :
-                    mode == FtxMode.Q65 ? "-3" : mode == FtxMode.FST4W ? "-W" : "-9",      // FT2: only the long form works in jt9 3.1.0
+                    mode == FtxMode.Q65 ? "-3" : mode == FtxMode.FST4W ? "-W" : mode == FtxMode.FST4 ? "-7" : mode == FtxMode.JT4 ? "-4" : "-9",      // FT2: only the long form works in jt9 3.1.0
                     "-d", (depth > 0 ? depth : Depth).ToString(CultureInfo.InvariantCulture),
                     "-f", rxFreq.ToString(CultureInfo.InvariantCulture),
                     "-L", LowHz.ToString(CultureInfo.InvariantCulture),
@@ -73,11 +74,13 @@ namespace Kainos.DigiModes.Decode
                 };
                 // Q65 and FST4W: the period (and Q65's submode); FST4W searches 1400 - 1600 Hz, Q65 100 Hz either side
                 // of the receive frequency first (it looks over the rest of the band too)
-                if (mode == FtxMode.Q65 || mode == FtxMode.FST4W)
+                // (FST4 and JT4 as Q65; JT4's submode too)
+                if (mode == FtxMode.Q65 || mode == FtxMode.FST4W || mode == FtxMode.FST4 || mode == FtxMode.JT4)
                 {
                     a.Add("-p"); a.Add(((int)FtxModes.Period(mode)).ToString(CultureInfo.InvariantCulture));
                     a.Add("-F"); a.Add("100");
                     if (mode == FtxMode.Q65) { a.Add("-b"); a.Add(FtxModes.Q65Sub.ToString()); }
+                    if (mode == FtxMode.JT4) { a.Add("-b"); a.Add(FtxModes.Jt4Sub.ToString()); }
                 }
                 if (okCall(myCall)) { a.Add("-c"); a.Add(myCall); }
                 if (okGrid(myGrid)) { a.Add("-G"); a.Add(myGrid.Substring(0, 4)); }
@@ -114,6 +117,7 @@ namespace Kainos.DigiModes.Decode
                 if (!m.Success) continue;
                 string msg = m.Groups[5].Value.Trim();
                 bool ap = false;
+                if (mode == FtxMode.JT4) { Match j = Jt4Tag.Match(msg); if (j.Success) msg = msg.Substring(0, j.Index).Trim(); }
                 Match t = ApTag.Match(msg);
                 if (t.Success) { ap = true; msg = msg.Substring(0, t.Index).Trim(); }
                 msg = Pack77.Normalise(msg);

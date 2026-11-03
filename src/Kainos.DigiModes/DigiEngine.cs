@@ -412,12 +412,21 @@ namespace Kainos.DigiModes
                 tones = mode == FtxMode.FST4W ? OtherModes.Fst4wTones(Fst4SimExe, Qso.MyCall, Qso.MyGrid, WsprDbm, (int)FtxModes.Period(mode), out why)
                                              : OtherModes.WsprTones(Qso.MyCall, Qso.MyGrid, WsprDbm, out why);
             }
-            else if (mode == FtxMode.Q65)
+            else if (mode == FtxMode.Q65 || mode == FtxMode.FST4)
             {
-                // Q65 carries FT8's 77-bit messages; q65code packs and codes them
+                // Q65 and FST4 carry FT8's 77-bit messages; q65code / fst4sim pack and code them
                 lock (Qso) { Qso.Jt = false; msg = Pack77.Normalise(Qso.NextMessage); }
                 string decodedAs;
-                tones = OtherModes.JtTones(mode, Q65CodeExe, msg, out decodedAs, out why);
+                tones = mode == FtxMode.Q65 ? OtherModes.JtTones(mode, Q65CodeExe, msg, out decodedAs, out why)
+                                            : OtherModes.Fst4Tones(Fst4SimExe, msg, (int)FtxModes.Period(mode), out why);
+            }
+            else if (mode == FtxMode.JT4)
+            {
+                // JT4 carries JT9's 72-bit messages: jt9code's coding, JT4's tones
+                lock (Qso) { Qso.Jt = true; msg = Pack77.Normalise(Qso.NextMessage); }
+                string decodedAs;
+                tones = OtherModes.Jt4Tones(Jt9CodeExe, msg, out decodedAs, out why);
+                if (tones != null && decodedAs != null && decodedAs != msg) Status?.Invoke("Will be received as: " + decodedAs);
             }
             else if (FtxModes.IsFtx(mode))
             {
@@ -446,7 +455,7 @@ namespace Kainos.DigiModes
             // WSPR's 200 Hz window is 1400 - 1600 Hz
             int txf = hound ? houndFreq() : wspr ? (TxFreq >= 1400 && TxFreq <= 1595 ? TxFreq : 1500) : TxFreq;
             float[] wave = FtxModes.IsFtx(mode) ? FtxModulator.Synthesize(mode, tones, txf, rate) :
-                           mode == FtxMode.FST4W ? OtherModes.SynthesizeFst4(tones, txf, rate, FtxModes.SymbolPeriod(mode)) :
+                           mode == FtxMode.FST4W || mode == FtxMode.FST4 ? OtherModes.SynthesizeFst4(tones, txf, rate, FtxModes.SymbolPeriod(mode)) :
                            OtherModes.SynthesizeFsk(mode, tones, txf, rate);
             float amp = (float)Math.Pow(10, LevelDb / 20.0);
             for (int i = 0; i < wave.Length; i++) wave[i] *= amp;

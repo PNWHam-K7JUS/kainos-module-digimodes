@@ -13,7 +13,11 @@ JT65, JT9, Q65, WSPR and FST4W transmit tones, and their audio: plain (continuou
         symbol d tone d + 1, of 65. Plain FSK, the tones baud x 1, 2, 4, 8 or 16 apart (submode A - E).
   FST4W: WSJT-X's fst4sim gives the 160 channel tones (0 - 3), which go out as WSJT-X's gen_fst4wave makes them:
         Gaussian FSK (BT 2), the tones a baud apart, the lowest at the Tx frequency (as fst4sim puts it, and jt9
-        reports it), a quarter-symbol ramp at each end.
+        reports it), a quarter-symbol ramp at each end. FST4 (QSOs) the same, from FT8's 77-bit messages.
+  JT4:  the same 72-bit message and K = 32 code as JT9, and the same bit-reversal interleaver (WSJT-X's interleave4 and
+        interleave9 are one permutation), so jt9code's channel symbols, Gray decoded, are JT4's 206 coded bits; each
+        goes out as tone 2 x bit + JT4's sync bit (npr, from WSJT-X's jt4.f90; inverted for a report as gen4.f90 has
+        it). 11025 / 2520 Hz x 1, 2, 4, 9, 18, 36 or 72 apart (submode A - G), 2520 / 11025 s each.
 
 This file is part of the Kainos Digital Modes module. Copyright (C) 2026 Justin Cron K7JUS. GPLv3 or later.
 */
@@ -99,6 +103,64 @@ namespace Kainos.DigiModes.Ftx
             }
             if (v.Count < 85 || v.Take(85).Any(x => x < 0 || x > 8)) { problem = "JT9: expected 85 tones, got " + v.Count; return null; }
             return v.Take(85).Select(x => (byte)x).ToArray();
+        }
+
+        // ---- JT4 ----
+
+        private static readonly byte[] Jt9Sync =
+        {
+            1,1,0,0,1,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0, 0,0,1,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,
+            0,0,0,0,0,0,0,0,0,0,1,1,0,0,1,0,0,0,0,1, 0,0,0,0,0,1,0,0,0,0,0,0,1,0,0,0,0,0,0,0,
+            0,0,1,0,1,
+        };
+
+        private static readonly byte[] Jt4Sync =
+        {
+            0,0,0,0,1,1,0,0,0,1,1,0,1,1,0,0,1,0,1,0,0,0,0,0,0,0,1,1,0,0, 0,0,0,0,0,0,0,0,0,0,1,0,1,1,0,1,1,0,1,0,1,1,1,1,1,0,1,0,0,0,
+            1,0,0,1,0,0,1,1,1,1,1,0,0,0,1,0,1,0,0,0,1,1,1,1,0,1,1,0,0,1, 0,0,0,1,1,0,1,0,1,0,1,0,1,0,1,1,1,1,1,0,1,0,1,0,1,1,0,1,0,1,
+            0,1,1,1,0,0,1,0,1,1,0,1,1,1,1,0,0,0,0,1,1,0,1,1,0,0,0,1,1,1, 0,1,1,1,0,1,1,1,0,0,1,0,0,0,1,1,0,1,1,0,0,1,0,0,0,1,1,1,1,1,
+            1,0,0,1,1,0,0,0,0,1,1,0,0,0,1,0,1,1,0,1,1,1,1,0,1,0,1,
+        };
+
+        // JT4's 206 tones (0 - 3) from JT9's 85 (0 sync, 1 - 8 data), for the message
+        internal static byte[] Jt4FromJt9(byte[] jt9, string message)
+        {
+            if (jt9 == null || jt9.Length != 85) return null;
+            List<int> bits = new List<int>(207);
+            for (int i = 0; i < 85; i++)
+            {
+                if (Jt9Sync[i] == 1) continue;
+                int g = jt9[i] - 1, b = g;                  // Gray coded 0 - 7, back to binary
+                b ^= b >> 1; b ^= b >> 2;
+                for (int k = 2; k >= 0; k--) bits.Add((b >> k) & 1);
+            }
+            // a report ("-01" to "-30") after the calls: the sync inverted (gen4.f90)
+            int dash = message.IndexOf('-');
+            bool flip = dash >= 8 && dash + 1 < message.Length && message[dash + 1] >= '0' && message[dash + 1] <= '3';
+            byte[] t = new byte[206];
+            for (int i = 0; i < 206; i++) t[i] = (byte)(2 * bits[i] + (flip ? 1 - Jt4Sync[i + 1] : Jt4Sync[i + 1]));
+            return t;
+        }
+
+        public static byte[] Jt4Tones(string jt9CodeExe, string message, out string decodedAs, out string problem)
+        {
+            byte[] jt9 = JtTones(FtxMode.JT9, jt9CodeExe, message, out decodedAs, out problem);
+            if (jt9 == null) return null;
+            return Jt4FromJt9(jt9, Pack77.Normalise(message));
+        }
+
+        // ---- FST4 (QSOs): fst4sim with the W flag off ----
+
+        public static byte[] Fst4Tones(string simExe, string message, int period, out string problem)
+        {
+            problem = null;
+            if (string.IsNullOrEmpty(simExe) || !File.Exists(simExe)) { problem = "fst4sim.exe isn't in the decoder folder"; return null; }
+            string work = Path.Combine(Path.GetTempPath(), "kainos-fst4");
+            Directory.CreateDirectory(work);
+            string output = run(simExe, message, out problem, " " + period.ToString(System.Globalization.CultureInfo.InvariantCulture) + " 1500 0.0 0.0 0.0 1 99 F", work);
+            try { foreach (string w in Directory.GetFiles(work, "*.wav")) File.Delete(w); } catch { }
+            if (output == null) return null;
+            return ParseFst4(output, out problem);
         }
 
         // ---- FST4W ----

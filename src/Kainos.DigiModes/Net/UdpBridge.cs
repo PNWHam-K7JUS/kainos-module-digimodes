@@ -64,7 +64,7 @@ namespace Kainos.DigiModes.Net
             {
                 DateTime slot = DateTime.UtcNow.Date + r.Time;
                 if (slot > DateTime.UtcNow.AddMinutes(1)) slot = slot.AddDays(-1);
-                FtxMode m = r.Mode == "+" ? FtxMode.FT4 : r.Mode == "#" ? FtxMode.JT65 : r.Mode == "@" ? FtxMode.JT9 : r.Mode == ":" ? FtxMode.Q65 : FtxMode.FT8;
+                FtxMode m = r.Mode == "+" ? FtxMode.FT4 : r.Mode == "#" ? FtxMode.JT65 : r.Mode == "@" ? FtxMode.JT9 : r.Mode == ":" ? FtxMode.Q65 : r.Mode == "$" ? FtxMode.JT4 : FtxMode.FT8;
                 if (m != _e.Mode) { _host.Log("UDP reply for " + m + " ignored while in " + _e.Mode); return; }
                 _pane.AnswerExternal(new DecodeLine { SlotUtc = slot, Snr = r.Snr, Dt = r.Dt, Freq = (int)r.Df, Message = Pack77.Normalise(r.Message), Mode = m });
             });

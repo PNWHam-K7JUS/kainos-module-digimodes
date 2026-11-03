@@ -1,7 +1,7 @@
-{
+﻿{
   "id": "digimodes",
-  "name": "Digital Modes (FT8 / FT4 / FT2 / JT65 / JT9 / Q65 / WSPR / FST4W)",
-  "description": "FT8, FT4, FT2 (experimental), JT65, JT9, Q65, WSPR and FST4W inside Kainos: band activity, automatic QSO sequencing and an ADIF log, in the Kainos look. Decoding by WSJT-X's jt9 (included).",
+  "name": "Digital Modes (FT8 / FT4 / FT2 / JT65 / JT9 / JT4 / Q65 / FST4 / WSPR / FST4W)",
+  "description": "FT8, FT4, JT65, JT9, WSPR, and (experimental, not yet tested on the air) FT2, JT4, Q65, FST4 and FST4W inside Kainos: band activity, automatic QSO sequencing and an ADIF log, in the Kainos look. Decoding by WSJT-X's jt9 (included).",
   "version": "0.11.0",
   "api": 1,
   "minKainos": "1.0.12",

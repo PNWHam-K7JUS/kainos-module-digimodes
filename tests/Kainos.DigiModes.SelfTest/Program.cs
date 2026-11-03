@@ -201,6 +201,37 @@ namespace Kainos.DigiModes.SelfTest
                 FtxModes.Q65Period = oldP; FtxModes.Q65Sub = oldS; FtxModes.Fst4wPeriod = oldF;
             }
 
+            // 17c. FST4 (QSOs, two periods) and JT4 (two submodes; a report inverts its sync): our tones and waveforms,
+            // decoded by jt9
+            {
+                int oldF4 = FtxModes.Fst4Period;
+                char oldJ = FtxModes.Jt4Sub;
+                foreach (string v in new[] { "FST4-60", "FST4-15", "JT4A|CQ K7JUS CN87", "JT4F|K1ABC K7JUS -15" })
+                {
+                    FtxMode mode = v.StartsWith("FST4") ? FtxMode.FST4 : FtxMode.JT4;
+                    string m = mode == FtxMode.FST4 ? "K1ABC K7JUS R-12" : v.Split('|')[1], why, asDec = null;
+                    if (mode == FtxMode.FST4) FtxModes.Fst4Period = int.Parse(v.Substring(5));
+                    else FtxModes.Jt4Sub = v[3];
+                    double f0 = 1000;
+                    byte[] tones = mode == FtxMode.FST4 ? OtherModes.Fst4Tones(Path.Combine(bin, "fst4sim.exe"), m, FtxModes.Fst4Period, out why)
+                                                        : OtherModes.Jt4Tones(Path.Combine(bin, "jt9code.exe"), m, out asDec, out why);
+                    if (tones == null) { check(false, FtxModes.Label(mode) + " tones: " + why); continue; }
+                    float[] w = mode == FtxMode.FST4 ? OtherModes.SynthesizeFst4(tones, f0, 12000, FtxModes.SymbolPeriod(mode)) : OtherModes.SynthesizeFsk(mode, tones, f0, 12000);
+                    float[] slot = new float[(int)(FtxModes.Period(mode) * 12000)];
+                    int at = (int)(FtxModes.TxStart(mode) * 12000);
+                    // -16 dB in 2.5 kHz (FST4-60 goes to about -25, FST4-15 to -20, JT4A to -23)
+                    double amp = 0.05 * Math.Sqrt(2500.0 / 6000) * Math.Sqrt(2) * Math.Pow(10, -16 / 20.0);
+                    for (int i = 0; i < slot.Length; i++) slot[i] = (float)(gauss(rnd) * 0.05 + (i >= at && i - at < w.Length ? w[i - at] * amp : 0));
+                    DateTime st = new DateTime(2026, 10, 16, 12, 10, 0, DateTimeKind.Utc);
+                    if (args.Contains("--keepwav")) Wav.Write16(Path.Combine(work, "test-" + FtxModes.Label(mode) + ".wav"), slot, 12000);
+                    List<DecodeLine> res = dec.Decode(mode, st, slot, (int)f0, "K7JUS", "CN87", "K1ABC", out why);
+                    DecodeLine hit = res.FirstOrDefault(r => r.Message == m);
+                    check(hit != null && Math.Abs(hit.Dt) <= 0.5 && Math.Abs(hit.Freq - f0) <= 3,
+                        FtxModes.Label(mode) + " decodes \"" + m + "\": " + (hit != null ? hit.ToString() : "nothing (" + (why ?? "") + ", " + string.Join(" | ", res.Select(r => r.Message + " @" + r.Freq)) + ")"));
+                }
+                FtxModes.Fst4Period = oldF4; FtxModes.Jt4Sub = oldJ;
+            }
+
             // 18. the engine in JT65 and WSPR, on a simulated clock (decoding as it happens: JT65's and WSPR's decodes
             // run long before the next period, so the frozen clock doesn't matter)
             {

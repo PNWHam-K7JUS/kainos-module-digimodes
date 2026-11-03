@@ -1,4 +1,4 @@
-﻿# Kainos Digital Modes (FT8 / FT4 / FT2 / JT65 / JT9 / Q65 / WSPR / FST4W)
+﻿# Kainos Digital Modes (FT8 / FT4 / FT2 / JT65 / JT9 / JT4 / Q65 / FST4 / WSPR / FST4W)
 
 A module for [Kainos](https://github.com/PNWHam-K7JUS/Kainos), the Hermes Lite 2 SDR program: FT8 and FT4 inside Kainos, in the Kainos look, with no virtual audio cables or CAT set-up.
 
@@ -15,8 +15,11 @@ A module for [Kainos](https://github.com/PNWHam-K7JUS/Kainos), the Hermes Lite 2
 - **Clock check**: the stations' median DT is shown beside the clock. If it's 0.6 s or more off, you're told to synchronise the PC's clock.
 - **ALL.TXT**: every decode and transmission is written to the log folder in WSJT-X's format.
 - **Sounds** when someone calls you, and optionally when a new DXCC entity calls CQ.
-- **The modes** from the mode button: **FT8**, **FT4**, **JT65** and **JT9** (one-minute QSOs with RRR, as WSJT-X and JTDX make them), **Q65**, and **WSPR** and **FST4W** beacons. All are decoded by WSJT-X's own jt9 and wsprd.
+- **The modes** from the mode button: **FT8**, **FT4**, **JT65**, **JT9** and **JT4** (one-minute QSOs with RRR, as WSJT-X and JTDX make them), **Q65**, **FST4**, and **WSPR** and **FST4W** beacons. All are decoded by WSJT-X's own jt9 and wsprd.
+- **Experimental:** FT2, JT4, Q65, FST4 and FST4W are marked *(experimental)* in the mode menu. They pass the self-test against WSJT-X's own encoders and decoder but haven't been tested on the air yet; reports are welcome.
 - **Q65**: QSOs with FT8's messages, for weak-signal VHF and up (ionoscatter, EME, rain scatter, tropo) and HF. Pick the period (15, 30, 60, 120 or 300 s) and submode (A to E: the tones 1 to 16 times further apart, for signals that spread out, such as EME at microwaves) under Q65 in the mode menu; Q65-30A is the 6 m ionoscatter mode, Q65-60A to 60E the EME ones. There are no Q65 frequencies in the Band menu: tune by hand. Its tones come from WSJT-X's q65code (included).
+- **FST4**: QSOs with FT8's messages and periods from 15 s to 30 minutes (under FST4 in the mode menu), mostly for 2200 m and 630 m, where the longer periods dig deepest. Tune by hand: there are no usual frequencies in the Band menu.
+- **JT4**: one-minute QSOs with JT9's messages, for EME and the microwave bands (and their beacons). Pick the submode under JT4 (A to G: the tones 1 to 72 times further apart, for the Doppler spread up there). Tune by hand.
 - **FST4W**: like WSPR, but a few dB more sensitive and with longer periods (2, 5, 15 or 30 minutes, under FST4W in the mode menu), mostly for 2200 m and 630 m. It uses WSPR's frequencies and its 1400 - 1600 Hz window, and the same Beacon settings (power, share of periods). Its tones come from WSJT-X's fst4sim (included). FST4W spots aren't uploaded to WSPRnet yet.
 - **FT2 (experimental)**: FT4's signal at twice the speed, with 3.75 s periods. It's decoded by the bundled WSJT-X Improved 3.1.0 decoder (`jt9 --ft2`) and sent with FT4's encoder at 24 ms symbols, as FT2's author describes it (4-GFSK, 167 Hz, LDPC 174,91). It's tested against WSJT-X Improved's decoder, but not yet on the air against Decodium. Default frequencies: 14.084, 7.062 and 3.582 MHz, editable. Logged as MFSK / FT2 (ADIF 3.1.7).
 - **WSPR**: decodes every two-minute period. **Beacon** transmits your call, grid and power in a share of periods (Settings > WSPR, 20 % usual; the Tx watchdog doesn't apply). With Settings > WSPR > Upload ticked, spots go to wsprnet.org (off by default). WSPR spots are also sent over UDP as WSJT-X does.
